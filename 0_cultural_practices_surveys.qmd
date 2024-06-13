@@ -1,0 +1,1957 @@
+---
+title: "Fertilizations Values"
+---
+
+A FAIRE : STANDARDISER OUTPUT DE CHAQUE FICHIER (NOM DES COLONNES)
+
+
+```{r setup, include=T, message=F, warning=F}
+knitr::opts_chunk$set(message=F, warning=F, results=F, fig.align = "center",  dev='svg')
+
+# Load the function file
+source("functions.R")
+#included:
+#-function to save csv f_save_csv_files
+#-set the default scale_color and scale_fill to viridis theme
+#-loads the core tidyverse package
+
+# Load additional required libraries
+library(DT) #for interactive tables
+# Load the required libraries
+library(plotly) #for interactive graphs
+#library(ggridges) #fro geom_ridgeline
+library(ggbeeswarm) #for geom_beeswarm 
+#library(data.table) #fast handling of large datasets
+library(viridis) #to set viridis color scales
+library(patchwork) #for multiple charts
+
+
+#set theme for graphs
+theme_set(
+  theme_classic() +
+  theme(
+    panel.grid.major.y = element_line(), #no vertical lines by default
+    #text = element_text(family = "Times New Roman"), #default font
+    plot.title = element_text(face="bold"), #graphs titles in bolds
+    )
+  )
+
+# molar mass K : 39, O : 16
+K2O_K_conversion_factor <- (2*39)/(2*39+16)
+# molar mass P : 31, O : 16
+P2O5_P_conversion_factor <- (2*31)/(2*31+5*16)
+```
+
+
+This page shows the fertilization values we use for each crop in our dataset. We use 2 main sources. 
+
+The first one is the French Practical Crop Surveys, applied to [major crops and grassland](https://agreste.agriculture.gouv.fr/agreste-web/disaron/Chd2009/detail/){target="_blank"}, and to [vineyards](https://agreste.agriculture.gouv.fr/agreste-web/disaron/Chd2315/detail/){target="_blank"}. 
+
+The remaining crops are not covered by these surveys. Instead, we use figures in a French [report](https://agriculture.gouv.fr/etude-prospective-sur-lestimation-des-besoins-actuels-et-futurs-de-lagriculture-biologique-en){target="_blank"} produced by the consultancy firm [AND international ](https://www.and-international.com/fr/qui-sommes-nous/){target="_blank"} for the French Ministry of Agriculture.
+
+# French Practical Crop Surveys
+
+## Major crops, temporary leys and grassland (2017)
+
+All the figures in this part are from the 2017 French Practical Crop Survey on [major crops, temporary leys and grassland](https://agreste.agriculture.gouv.fr/agreste-web/disaron/Chd2009/detail/){target="_blank"} ("*Enquêtes pratiques culturales en grandes cultures et prairies*").
+
+### Prepare data {.tabset .tabset-fade .tabset-pills}
+
+First we load and organize the data.
+
+```{r load_and_organize_major_crops}
+#load file containing survey figures
+survey_major_crops <- read_csv("source/fertilization/practical_crop_surveys/2017_major_crops_leys_grasslands/fertilization_major_crops_leys_grasslands.csv")
+
+# remove column describing the source of the figures
+survey_major_crops <- survey_major_crops %>%
+  select(-source) 
+
+# replace ns (non significative) with NAs and transform character values to numerics
+survey_major_crops <- survey_major_crops %>%
+  mutate(value = ifelse(value == "ns", NA, value))
+survey_major_crops$value <- as.numeric(survey_major_crops$value)
+
+#spread columns related to fertilization practices, only keep items of interest
+survey_major_crops <- survey_major_crops%>%
+  spread(variable, value) 
+
+#rename French variables in our standardized way
+survey_major_crops <- survey_major_crops %>% rename(
+  #yield and area
+  `yield (t/ha)` = `rendement (t/ha)`,
+  `mean field area (ha)` = `superficie moyenne (ha)`,
+  `% organic agriculture` = `% agriculture biologique`,
+  # mean fertilization rates
+  `N mineral mean fertilization (kgN/ha)`=`apport moyen (kgN/ha)`,
+  `P mineral mean fertilization (kgP/ha)`=`apport moyen (kgP2O5/ha)`,
+  `K mineral mean fertilization (kgK/ha)`=`apport moyen (kgK2O/ha)`,
+  `N organic mean fertilization (kgN/ha)`=`apport moyen (kgNorga/ha)`,
+  #percent fields fertilized
+  `% fields fertilized N mineral` = `% parcelles fertilisées N`,
+  `% fields fertilized P mineral` = `% parcelles fertilisées P`,
+  `% fields fertilized K mineral` = `% parcelles fertilisées K`,
+  `% fields fertilized organic` = `% parcelles fertilisées orga`,
+  #fertilization on fertilized fields
+  `N mineral fertilization on fertilized fields (kgN/ha)` = `apport sur parcelles fertilisées (kgN/ha)`,
+  `P mineral fertilization on fertilized fields (kgP/ha)` = `apport sur parcelles fertilisées (kgP2O5/ha)`,
+  `K mineral fertilization on fertilized fields (kgK/ha)` = `apport sur parcelles fertilisées (kgK2O/ha)`,
+  `N organic fertilization on fertilized fields (kgN/ha)` = `apport sur parcelles fertilisées (kgNorga/ha)`
+  )
+
+# We convert P2O5 and K2O to P and K.
+survey_major_crops$`P mineral mean fertilization (kgP/ha)` <- round(survey_major_crops$`P mineral mean fertilization (kgP/ha)`*P2O5_P_conversion_factor, 1)
+
+survey_major_crops$`P mineral fertilization on fertilized fields (kgP/ha)` <- round(survey_major_crops$`P mineral fertilization on fertilized fields (kgP/ha)`*P2O5_P_conversion_factor, 1)
+
+survey_major_crops$`K mineral mean fertilization (kgK/ha)` <- round(survey_major_crops$`K mineral mean fertilization (kgK/ha)`*K2O_K_conversion_factor, 1)
+
+survey_major_crops$`K mineral fertilization on fertilized fields (kgK/ha)` <- round(survey_major_crops$`K mineral fertilization on fertilized fields (kgK/ha)`*K2O_K_conversion_factor, 1)
+```
+
+The survey presents 2 types of fertilization figures. First, the mean fertilization (in kg/ha) on all the fields. Second, the mean fertilization only on the fields that are fertilized. This latter is not systematically reported. The link between the 2 quantities is:
+
+<div style="text-align: center;">*mean fertilization on all fields = (% of fields fertilized) x (mean fertilization on fertilized fields)*</div>
+
+
+We compute the missing values from the relation. The extrapolation is completely coherent (in the graphs below, the point are aligned across the 1:1 line), except for permanent and temporary grassland for N organic fertilization. As our study only focuses on mineral fertilization, this does not impact the results.
+
+```{r extrapolate_fertilization}
+#if fertilization on fertilized field not reported, we compute it from the other 2 variables
+survey_major_crops <- survey_major_crops %>%
+    mutate(
+      #N
+      `N mineral fertilization on fertilized fields (kgN/ha)` = case_when(
+        is.na(`N mineral fertilization on fertilized fields (kgN/ha)`) ~ 
+          round(`N mineral mean fertilization (kgN/ha)`/`% fields fertilized N mineral`*100, 1),
+        T ~ round(`N mineral fertilization on fertilized fields (kgN/ha)`, 1)
+      ),
+      #P
+      `P mineral fertilization on fertilized fields (kgP/ha)` = case_when(
+        is.na(`P mineral fertilization on fertilized fields (kgP/ha)`) ~ 
+          round(`P mineral mean fertilization (kgP/ha)`/`% fields fertilized P mineral`*100, 1),
+        T ~ round(`P mineral fertilization on fertilized fields (kgP/ha)`, 1)
+      ),
+      #K
+      `K mineral fertilization on fertilized fields (kgK/ha)` = case_when(
+        is.na(`K mineral fertilization on fertilized fields (kgK/ha)`) ~ 
+          round(`K mineral mean fertilization (kgK/ha)`/`% fields fertilized K mineral`*100, 1),
+        T ~ round(`K mineral fertilization on fertilized fields (kgK/ha)`, 1)
+      ),
+      #N orga
+      `N organic fertilization on fertilized fields (kgN/ha)` = case_when(
+        is.na(`N organic fertilization on fertilized fields (kgN/ha)`) ~ 
+          round(`N organic mean fertilization (kgN/ha)`/`% fields fertilized organic`*100, 1),
+        T ~ round(`N organic fertilization on fertilized fields (kgN/ha)`, 1)
+      )
+    )
+
+# replace NaN (when divided by 0) with 0s
+is.nan.data.frame <- function(x){
+  do.call(cbind, lapply(x, is.nan))
+}
+survey_major_crops[is.nan(survey_major_crops)] <- 0
+
+# replace inf (when divided by 0) with 0s
+is.inf.data.frame <- function(x) {
+  do.call(cbind, lapply(x, is.infinite))
+}
+survey_major_crops[is.inf.data.frame(survey_major_crops)] <- 0
+
+rm(is.nan.data.frame, is.inf.data.frame)
+```
+
+```{r f_graph_coherence_ferti}
+#function to see coherence between reported and computed quantities
+f_graph_coherence_ferti <- function(column_ferti, column_perc_ferti, column_mean_ferti, label_nutrient, label_unit){
+  gg <- ggplot(survey_major_crops) +
+    geom_point(
+      aes(
+        x={{ column_ferti }}*{{ column_perc_ferti }}/100, 
+        y={{ column_mean_ferti }},
+        text = paste0(
+          "region: ", name_old_region, "\n", 
+          "crop: ", crop_fertilization_label
+          )
+        )
+      ) +
+    labs(
+      x=paste0("(", label_nutrient, " fertilization on fertilized fields) x (% fields fertilized)", "\n (", label_unit, ")") ,
+      y=paste0(label_nutrient, " mean fertilization ", "\n (", label_unit, ")"),
+      title = paste0("coherence of computed and reported quantities, ", label_nutrient)
+    ) 
+  
+  return(ggplotly(gg, tooltip = c("text")))
+}
+```
+
+::: panel-tabset
+#### N orga
+
+```{r coherence_N_orga, results=T}
+f_graph_coherence_ferti(
+  `N organic fertilization on fertilized fields (kgN/ha)`,
+  `% fields fertilized organic`,
+  `N organic mean fertilization (kgN/ha)`,
+  "N organic", "kgN/ha"
+  )
+```
+
+#### N min
+
+```{r coherence_N_min, results=T}
+f_graph_coherence_ferti(
+  `N mineral fertilization on fertilized fields (kgN/ha)`,
+  `% fields fertilized N mineral`,
+  `N mineral mean fertilization (kgN/ha)`,
+  "N mineral", "kgN/ha"
+  )
+```
+
+#### P min
+
+```{r coherence_P_min, results=T}
+f_graph_coherence_ferti(
+  `P mineral fertilization on fertilized fields (kgP/ha)`,
+  `% fields fertilized P mineral`,
+  `P mineral mean fertilization (kgP/ha)`,
+  "P mineral", "kgP/ha"
+  )
+```
+
+#### K min
+
+```{r coherence_K_min, results=T}
+f_graph_coherence_ferti(
+  `K mineral fertilization on fertilized fields (kgK/ha)`,
+  `% fields fertilized K mineral`,
+  `K mineral mean fertilization (kgK/ha)`,
+  "K mineral", "kgK/ha"
+  )
+```
+
+:::
+
+### Vizualize survey data on graphs {.tabset .tabset-fade. .tabset-pills}
+
+Double click on an item in the legend to focus on it. Move mouse over graph to see more infos.
+
+```{r function_graph_major_crops_2017_survey}
+ #function to make interactive graphs 
+f_graph_major_crops_by_crop <- function(data, variable_y, y_max, breaks_legnth, y_label, title_label){
+  unique_regions <- sort(unique(data$name_old_region))
+  colors <- viridis(length(unique_regions))
+  
+  # Create a named vector with region-color mapping
+  region_color_mapping <- setNames(colors, unique_regions)
+  # Change the color for "France" to red and add it to the mapping
+  region_color_mapping["France"] <- "red"
+
+  gg <- ggplot(data) +
+    geom_beeswarm(
+      aes(
+        reorder(crop_fertilization_label, {{ variable_y }}), {{ variable_y }},
+        color=name_old_region,
+        text = paste(
+          as.character(name_old_region), "\n", 
+          as.character(crop_fertilization_label), "\n", 
+          as.character(signif({{ variable_y }}, 3)), y_label)
+          )
+      ) +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1)
+    ) +
+    scale_y_continuous(
+      breaks = seq(0, y_max, by = breaks_legnth), 
+      limits = c(0, NA)
+      ) +
+    labs(
+      x="", color="", y=y_label, title = title_label
+      ) +
+    scale_color_manual(
+      values = region_color_mapping,
+      breaks = unique_regions,
+      labels = unique_regions
+    ) 
+  
+  return(ggplotly(gg, tooltip = c("text")))
+}
+```
+
+::: panel-tabset
+#### Mean Fertilization {.tabset .tabset-fade .tabset-pills}
+
+Mean fertilization in all fields (includes both fertilized and untertilized fields).
+
+::: panel-tabset
+##### N mineral {.tabset .tabset-fade}
+
+```{r mean_ferti_crops_N_min, results=T, out.width='100%'}
+f_graph_major_crops_by_crop(survey_major_crops, `N mineral mean fertilization (kgN/ha)`, 200, 10, "kgN/ha", "Crop mean fertilization by crop type, mineral N") 
+```
+
+##### P mineral {.tabset .tabset-fade}
+
+```{r mean_ferti_crops_P_min, results=T, out.width='100%'}
+f_graph_major_crops_by_crop(survey_major_crops, `P mineral mean fertilization (kgP/ha)`, 40, 5, "kgP/ha", "Crop mean fertilization by crop type, mineral P") 
+```
+
+##### K mineral {.tabset .tabset-fade}
+
+```{r mean_ferti_crops_K_min, results=T, out.width='100%'}
+f_graph_major_crops_by_crop(survey_major_crops, `K mineral mean fertilization (kgK/ha)`, 200, 10, "kgK/ha", "Crop mean fertilization by crop type, mineral K") 
+```
+
+##### N organic {.tabset .tabset-fade}
+
+```{r mean_ferti_crops_N_orga, results=T, out.width='100%'}
+f_graph_major_crops_by_crop(survey_major_crops, `N organic mean fertilization (kgN/ha)`, 200, 10, "kgN/ha", "Crop mean fertilization by crop type, organic N") 
+```
+
+```{r}
+library(RColorBrewer)
+palette <- c(brewer.pal(12, "Paired"), brewer.pal(12, "Set3"))
+
+#focus on N mineral and organic ferti
+temp <- survey_major_crops %>%
+  select(name_old_region, crop_fertilization_label, mineral = `N mineral mean fertilization (kgN/ha)`, organic = `N organic mean fertilization (kgN/ha)`) %>%
+  gather(variable, value, c(mineral, organic))
+
+#Reorder by ascending mineral value
+temp$crop_fertilization_label <- factor(
+  temp$crop_fertilization_label,
+  levels = temp %>% filter(variable == "mineral", name_old_region == "France") %>% arrange(desc(value)) %>% pull(crop_fertilization_label)
+)
+
+gg <- ggplot(temp) +
+  geom_beeswarm(
+    #region values
+    data = temp %>% filter(name_old_region != "France"),
+    aes(
+      crop_fertilization_label, value,
+      color=name_old_region
+      ),
+    alpha=.7
+    ) +
+    #national value in black
+  geom_point(
+    data = temp %>% filter(name_old_region == "France"),
+    aes(
+      crop_fertilization_label, value
+      ),
+    fill="black", size=4, shape=18
+  ) +
+  #other graphs options
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  ) +
+  scale_y_continuous(
+    breaks = seq(0, 260, 20)
+  ) +
+  labs(
+    x="", color="regions:", y="kgN/ha", subtitle = "black diamond: France"
+    ) +
+  scale_color_manual(
+    values = palette,
+  ) + 
+  facet_wrap(vars(variable), ncol=1)
+
+f_save_graph_pdf_png(
+  gg, "graph/fertilization_values/", "major_field_crops_fertilization",
+  350, 6, 8
+)
+
+```
+
+
+:::
+
+#### % Fertilized {.tabset .tabset-fade .tabset-pills}
+
+% of fields which are actually fertilized.
+
+::: panel-tabset
+##### N mineral {.tabset .tabset-fade}
+
+```{r percent_ferti_N_min_crops, results=T, out.width='100%'}
+f_graph_major_crops_by_crop(survey_major_crops, `% fields fertilized N mineral`, 100, 5, "%", "% fields fertilized with mineral N, by crop")
+```
+
+##### P mineral {.tabset .tabset-fade}
+
+```{r percent_ferti_P_min_crops, results=T, out.width='100%'}
+f_graph_major_crops_by_crop(survey_major_crops, `% fields fertilized P mineral`, 100, 5, "%", "% fields fertilized with mineral P, by crop")
+```
+
+##### K mineral {.tabset .tabset-fade}
+
+```{r percent_ferti_K_min_crops, results=T, out.width='100%'}
+f_graph_major_crops_by_crop(survey_major_crops, `% fields fertilized K mineral`, 100, 5, "%", "% fields fertilized with mineral K, by crop")
+```
+
+##### Organic fertilizers {.tabset .tabset-fade}
+
+```{r percent_ferti_orga_crops, results=T, out.width='100%'}
+f_graph_major_crops_by_crop(survey_major_crops, `% fields fertilized organic`, 100, 5, "%", "% fields fertilized with organic fertilizers, by crop")
+```
+
+:::
+
+#### Fertilization on fertilized fields {.tabset .tabset-fade .tabset-pills}
+
+Mean fertilization, excluding fields that are not fertilized.
+
+::: panel-tabset
+
+##### N mineral {.tabset .tabset-fade}
+
+```{r actual_ferti_crops_N_min, results=T, out.width='100%'}
+f_graph_major_crops_by_crop(survey_major_crops, `N mineral fertilization on fertilized fields (kgN/ha)`, 250, 20, "kgN/ha", "Fertilization on fertilized fields, by crop type, mineral N") 
+```
+
+##### P mineral {.tabset .tabset-fade}
+
+```{r actual_ferti_crops_P_min, results=T, out.width='100%'}
+f_graph_major_crops_by_crop(survey_major_crops, `P mineral fertilization on fertilized fields (kgP/ha)`, 60, 5, "kgP/ha", "Fertilization on fertilized fields, by crop, mineral P") 
+```
+
+##### K mineral {.tabset .tabset-fade}
+
+```{r actual_ferti_crops_K_min, results=T, out.width='100%'}
+f_graph_major_crops_by_crop(survey_major_crops, `K mineral fertilization on fertilized fields (kgK/ha)`, 250, 20, "kgK/ha", "Fertilization on fertilized fields, by crop type, mineral K") 
+```
+
+##### N organic {.tabset .tabset-fade}
+
+```{r actual_ferti_crops_N_orga, results=T, out.width='100%'}
+f_graph_major_crops_by_crop(survey_major_crops, `N organic fertilization on fertilized fields (kgN/ha)`, 300, 20, "kgN/ha", "Fertilization on fertilized fields, by crop type, organic N") 
+```
+
+:::
+
+#### Yield, Area, % Organic {.tabset .tabset-fade. .tabset-pills}
+
+::: panel-tabset
+##### Yield {.tabset .tabset-fade}
+
+```{r yield_crops, results=T, out.width='100%'}
+f_graph_major_crops_by_crop(survey_major_crops, `yield (t/ha)`, 120, 10, "t/ha", "Crops yield by crop type") 
+```
+
+##### Mean Area {.tabset .tabset-fade}
+
+```{r mean_area_by_crop, results=T, out.width='100%'}
+f_graph_major_crops_by_crop(survey_major_crops, `mean field area (ha)`, 100, 5, "ha", "mean field area, by crop type")
+```
+
+##### % organic fields {.tabset .tabset-fade}
+
+```{r percent_organic_crops, results=T, out.width='100%'}
+f_graph_major_crops_by_crop(survey_major_crops, `% organic agriculture`, 100, 5, "%", "% fields in organic agriculture, by crop type")
+```
+
+
+:::
+
+:::
+
+### Explore survey data in a table
+
+Besides the graphs above, you can also interactively explore the data in the table below.
+
+```{r table_all_data_2017, results=T}
+datatable(
+  survey_major_crops, options = list(scrollX = TRUE, responsive = TRUE)
+)
+```
+
+### Permanent grassland regional data {.tabset .tabset-fade .tabset-pills}
+
+As you can see in the graphs above, permanent and temporary grasslands figures are only reported at the national level, and not at the regional level.
+
+Maybe we will be able to fill this gap later by accessing the original survey data. For now, we can only fill the permanent grassland gap, by using the regional values from [Billen et al (2024)](https://www.sciencedirect.com/science/article/abs/pii/S0048969723067876){target="_blank"}. 
+
+We can only add N mineral and P mineral values since K is not assessed in their study. We do not take their N organic values, since they also includes livestock direct excretions on grassland, which is different than the survey looking only at spreading by the farmer. You can check the values in the 2 tabs below.
+
+```{r add_grassland_fertilization_from_Billen}
+# load GRAFS data from Billen et al
+GRAFS <- read_csv("source/fertilization/GRAFS_Billen_data/GRAFS_ferti_France_regions.csv")
+
+# get N and P mineral fertilization for permanent grasslands for each regions
+GRAFS <- GRAFS %>% 
+  filter(`crop type`=="permanent grassland") %>%
+  select(
+    name_old_region, 
+    `N mineral mean fertilization (kgN/ha)` = `fertilizer N rate (kgN/ha)`,
+    `P mineral mean fertilization (kgP/ha)`  = `fertilizer P rate (kgP/ha)`
+    ) %>%
+  mutate(crop_fertilization_label = "13-Prairies Permanentes")
+
+# add these regional values to fertilization levels file
+survey_major_crops <-  bind_rows(survey_major_crops, GRAFS)
+```
+
+::: panel-tabset
+#### N mineral 
+
+```{r graph_permanent_grassland_Nmin_Billen, results=T}
+gg <- ggplot(GRAFS) +
+  geom_col(
+    aes(
+      x = reorder(name_old_region, `N mineral mean fertilization (kgN/ha)`),
+      y = `N mineral mean fertilization (kgN/ha)`,
+      text = paste0(
+        name_old_region, "\n",
+        round(`N mineral mean fertilization (kgN/ha)`), " kgN/ha"
+        )
+      )
+    ) +
+  theme(
+    axis.text.x = element_text(angle=45, h=1)
+  ) +
+  labs(x="", title = "N mineral fertilization on permanent grassland (Billen data)")
+ggplotly(gg, tooltip = c("text"))
+```
+
+#### P mineral {.tabset .tabset-fade .tabset-pills}
+
+```{r graph_permanent_grassland_Pmin_Billen, results=T}
+gg <- ggplot(GRAFS) +
+  geom_col(
+    aes(
+      x = reorder(name_old_region, `P mineral mean fertilization (kgP/ha)`),
+      y = `P mineral mean fertilization (kgP/ha)`,
+      text = paste0(
+        name_old_region, "\n",
+        round(`P mineral mean fertilization (kgP/ha)`), " kgP/ha"
+        )
+      )
+    ) +
+  theme(
+    axis.text.x = element_text(angle=45, h=1)
+  ) +
+  labs(x="", title = "P mineral fertilization on permanent grassland (Billen data)")
+ggplotly(gg, tooltip = c("text"))
+```
+
+```{r remove_billen_temporary_file}
+rm(GRAFS, gg)
+```
+
+:::
+
+### Extrapolations for similar crops
+
+The survey we use reports practices for some of the major crops (wheat, maize, sugar beet...). However this does not concern all of the major crops grown in France and reported in the RPG dataset. For the ones not surveyed, we assume that the practices is the same as similar surveyed crops. Here is the matching pairs for our extrapolations: 
+
+  - "Other cereals": approximated with barley values
+  - "Other oil crops": approximated with sunflower values
+  - "Other fiber crops": approximated with fiber flax values
+  - "Other protein crops": approximated with faba bean values
+  - "Other grain legumes": approximated with soybean values
+
+```{r other_major_crops_proxi_values}
+#new data frame which will hold our extrapolations (so that we keep the survey data frame clean)
+ferti_major_crops <- survey_major_crops
+
+#function that adds a crop to the data set (similar_crop) using values of an original crop as proxy
+f_add_similar_crops <- function(orginal_crop_label, similar_crop_label){
+  #create the similar crop data set
+  similar_crop_df <- ferti_major_crops %>%
+    #keep only values of the orginal crop used as a proxy
+    filter(crop_fertilization_label == orginal_crop_label) %>%
+    #replace origina crop name with the new similar crop name
+    mutate(crop_fertilization_label = similar_crop_label)
+  
+  #adds the data to original file
+  ferti_major_crops <- bind_rows(ferti_major_crops, similar_crop_df)
+  
+  return(ferti_major_crops)
+}
+
+ferti_major_crops <- f_add_similar_crops("03-Orge", "Autres céréales")
+ferti_major_crops <- f_add_similar_crops("06-Tournesol", "Autres oléagineux")
+ferti_major_crops <- f_add_similar_crops("17-Lin fibre", "Autres plantes à fibres")
+ferti_major_crops <- f_add_similar_crops("15-Féverole", "Autres protéagineux")
+ferti_major_crops <- f_add_similar_crops("16-Soja", "Autres légumineuses à graines")
+```
+
+For fodders:
+
+  - Fodder- Non legume: fodder maize
+  - Fodder- Legume: faba bean
+  - Fodder – Legume + Non Legume: mean of maize and faba bean
+  
+```{r fodder_proxi_values}
+ferti_major_crops <- f_add_similar_crops("15-Féverole", "Fourrages – Légumineuses")
+ferti_major_crops <- f_add_similar_crops("08-Maïs fourrage", "Fourrages – Non Légumineuse")
+
+#fodder legume + non legume : mean of the 2
+temp_fodder_non_legume <- ferti_major_crops %>% 
+  filter(crop_fertilization_label == "Fourrages – Non Légumineuse")
+temp_fodder_legume <- ferti_major_crops %>% 
+  filter(crop_fertilization_label == "Fourrages – Légumineuses")
+
+#keep only the regions were we have values for both legumes and non legumes fodders
+regions_non_legumes <- unique(temp_fodder_non_legume$name_old_region) #get non legumes regions
+regions_legumes <- unique(temp_fodder_legume$name_old_region) # get legumes regions
+common_regions <- unique(intersect(regions_non_legumes, regions_legumes)) #keep only regions in both of them
+
+temp_fodder_legume_and_non_legume <- 
+  bind_rows(temp_fodder_non_legume, temp_fodder_legume) %>% #gather legumes and non legumes proxy
+  filter(name_old_region %in% common_regions) %>% #keep only regions present in both values 
+  group_by(name_old_region) %>%
+  summarise_at(vars(-(crop_fertilization_label)) , mean) %>% #take the mean of the 2 values
+  mutate(crop_fertilization_label = "Fourrages – Légumineuses + Non Légumineuses")
+
+#add the values to main file
+ferti_major_crops <- bind_rows(ferti_major_crops, temp_fodder_legume_and_non_legume)
+
+#remove temporary files
+rm(temp_fodder_non_legume, temp_fodder_legume, temp_fodder_legume_and_non_legume, regions_non_legumes, regions_legumes, common_regions)
+
+```
+  
+Also, for some crops of our RPG data, we just attribute a "0" fertilization value. This is the case for "Fallows" and "Mountain pastures and heaths", which are obviously not (or almost not) fertilized. We do likewise for the "Others" category, which groups all the rare crops that cannot be grouped in a broad category.
+
+```{r crops_with_0_fertilization}
+#function to add items with 0 fertilization
+f_add_unfertilized_crops <- function(item_label){
+  #get the first row of the main file and set all values to 0
+  temp <- ferti_major_crops %>% slice(1)
+  temp[,] <- 0
+   
+  #fill the values different than 0
+  temp <- temp %>%
+    mutate(
+      #crop name
+      crop_fertilization_label = item_label,
+      #region: France (other regions will be filled in the next tab "Extrapolation (region, crop)")
+      name_old_region = "France",
+      #variables not relevant: fill with empty value rather than 0
+      `mean field area (ha)` = NA,
+      `% organic agriculture` = NA
+      ) 
+  
+  ferti_major_crops <- bind_rows(ferti_major_crops, temp)
+  
+  return(ferti_major_crops)
+}
+
+ferti_major_crops <- f_add_unfertilized_crops("Estives et landes")
+ferti_major_crops <- f_add_unfertilized_crops("Autres divers")
+ferti_major_crops <- f_add_unfertilized_crops("Jachère")
+```
+
+### Extrapolation (region, crop) non surveyed
+
+Not all crops in all regions are surveyed. You can see the missing regions for each crops in the grid below (red boxes).
+
+```{r pairs_major_crops, results=T}
+f_graph_pairs <- function(dataset){
+  
+  # Surveyed pairs (crops, region)
+  region_crop_surveyed <- dataset %>%
+    select(crop_fertilization_label, name_old_region) %>%
+    distinct()
+
+  # Create all (crop, region) pairs possible
+  all_pairs <- expand.grid(
+    crop = unique(ferti_major_crops$crop_fertilization_label), 
+    region = unique(ferti_major_crops$name_old_region)
+    )
+
+  # Add variable indicating if fertilization value surveyed, extrapolated or absent from dataset
+  all_pairs$fertilization <- ifelse(
+    do.call(paste, all_pairs) %in% do.call(paste, region_crop_surveyed),
+    "Surveyed",
+    "Not Surveyed"
+    )
+
+  # Create a plot
+  gg <- 
+    ggplot(
+      all_pairs, 
+      aes(
+        x = crop, y = region, fill = fertilization
+        )
+    ) +
+    geom_tile(color = "white") +
+    scale_fill_manual(
+      values = c("Surveyed" = "green", "Not Surveyed" = "red")
+      ) +
+    labs(
+      title = "(region,crop) pairs surveyed", x = "", y = "", fill=""
+      ) +
+    theme(
+      axis.text.x = element_text(angle=45, h=1)
+      )
+
+  
+  return(ggplotly(gg))
+}
+f_graph_pairs(ferti_major_crops)
+```
+
+For the missing values, we decide to take the French national mean value as an extrapolation.
+
+```{r regions_missing_values_extrapolation_with_French_mean}
+# Surveyed pairs (crops, region)
+region_crop_surveyed_2017 <- ferti_major_crops %>%
+  select(crop_fertilization_label, name_old_region) %>%
+  distinct()
+
+# Create all (crop, region) pairs possible
+all_pairs_2017 <- expand.grid(
+  crop_fertilization_label = unique(ferti_major_crops$crop_fertilization_label), 
+  name_old_region = unique(ferti_major_crops$name_old_region)
+  )
+
+# Add variable indicating if fertilization value surveyed, extrapolated or absent from dataset
+all_pairs_2017$fertilization <- ifelse(
+  do.call(paste, all_pairs_2017) %in% do.call(paste, region_crop_surveyed_2017),
+  "Surveyed",
+  "Not Surveyed"
+  )
+
+# creates the main file with all the pairs (for now some empty values)
+ferti_major_crops_expanded <- left_join(
+  all_pairs_2017, ferti_major_crops,
+  by=join_by(crop_fertilization_label, name_old_region)
+  )
+
+#get unique region names, crop names and columns names
+region_names <- unique(ferti_major_crops_expanded$name_old_region)
+crops_names <- unique(ferti_major_crops_expanded$crop_fertilization_label)
+column_names <- names(ferti_major_crops_expanded %>% select(-crop_fertilization_label, -name_old_region, -fertilization))
+
+#if crop in particular region not surveyed, we take the French mean
+for (name_old_region in region_names) {
+  for (crop_fertilization_label in crops_names) {
+    for (column in column_names) {
+        if(
+          is.na(ferti_major_crops_expanded[ferti_major_crops_expanded$name_old_region==name_old_region &
+                                           ferti_major_crops_expanded$crop_fertilization_label==crop_fertilization_label, column])
+          ){
+         ferti_major_crops_expanded[
+           ferti_major_crops_expanded$name_old_region==name_old_region &
+             ferti_major_crops_expanded$crop_fertilization_label==crop_fertilization_label, column
+           ] <-
+           ferti_major_crops_expanded[
+             ferti_major_crops_expanded$name_old_region=="France" &
+               ferti_major_crops_expanded$crop_fertilization_label==crop_fertilization_label, column]
+        }
+    }
+  }
+}
+#remove temporary variables
+rm(region_names, crops_names, column_names, name_old_region, crop_fertilization_label, column)
+
+#reorder columns
+ferti_major_crops <- ferti_major_crops_expanded %>%
+  select(
+    #region and fertilization
+    crop_fertilization_label, name_old_region, 
+    #yield, area, % organic
+    `yield (t/ha)`, `mean field area (ha)`, `% organic agriculture`,
+    #mean fertilization
+    `N mineral mean fertilization (kgN/ha)`, `P mineral mean fertilization (kgP/ha)` , `K mineral mean fertilization (kgK/ha)` , `N organic mean fertilization (kgN/ha)`,
+    #%fields fertilized
+    `% fields fertilized N mineral`, `% fields fertilized P mineral`, `% fields fertilized K mineral`, `% fields fertilized organic`,
+    #fertilization on fertilized fields
+    `N mineral fertilization on fertilized fields (kgN/ha)`, `P mineral fertilization on fertilized fields (kgP/ha)`, `K mineral fertilization on fertilized fields (kgK/ha)`, `N organic fertilization on fertilized fields (kgN/ha)`
+  )
+```
+
+The original survey and its extrapolations constitutes our fertilization data for the major crops, that we will add to our main dataset. We save it.
+
+```{r save_final_major_crops_fertilization_values}
+#save our new procesed file
+f_save_csv_files(
+  ferti_major_crops, 
+  "output/fertilization/fertilization_surveys/",
+  "fertilization_major_crops_leys_grasslands_by_old_region.csv")
+
+#remove temporary variables
+rm(all_pairs_2017, region_crop_surveyed_2017, ferti_major_crops_expanded)
+```
+
+
+
+
+
+## Vineyards (2019)
+
+### Load and Prepare data
+
+All the figures in this part are from the [2019 French Practical](https://agreste.agriculture.gouv.fr/agreste-web/disaron/Chd2315/detail/){target="_blank"} Crop Survey on vineyards (“Enquêtes pratiques culturales en vitivultue”).
+
+They report the results by wine basins, and not by administrative regions. You can see the French wine-growing basins [here](https://agriculture.gouv.fr/infographie-la-viticulture-francaise){target="_blank"}. We adapt the data to the administrative regions later. 
+
+```{r load_and_organize_vineyard_data}
+path <- "source/fertilization/practical_crop_surveys/2019_vineyards/fertilization_wine.csv"
+survey_vineyards <- read_csv(path) 
+
+#replace ns with Nas
+survey_vineyards <- survey_vineyards %>%
+  mutate(value = ifelse(value == "ns", NA, value))
+
+#convert numbers in characters wit "," as decimals to numerics
+survey_vineyards$value <- as.numeric(gsub(",", ".", survey_vineyards$value))
+
+#spread columns related to fertilization practices, only keep items of interest
+survey_vineyards <- survey_vineyards %>%
+  spread(variable, value) 
+
+#remove data about organic agriculture
+survey_vineyards <- survey_vineyards %>%
+  filter(`organic or all`=="all") %>%
+  select(-`organic or all`)
+
+#rename P2O5 and K2O to P and K
+survey_vineyards <- survey_vineyards %>% rename(
+  #mineral fertilization on fertilized fields
+  `P mineral fertilization on fertilized fields (kgP/ha)` = `P mineral fertilization on fertilized fields (kgP2O5/ha)`,
+  `K mineral fertilization on fertilized fields (kgK/ha)` = `K mineral fertilization on fertilized fields (kgK2O/ha)`,
+  #organic fertilization on fertilized fields
+  `P organic fertilization on fertilized fields (kgP/ha)` = `P organic fertilization on fertilized fields (kgP2O5/ha)`,
+  `K organic fertilization on fertilized fields (kgK/ha)` = `K organic fertilization on fertilized fields (kgK2O/ha)`
+  )
+
+#convert P205 to P
+survey_vineyards$`P mineral fertilization on fertilized fields (kgP/ha)` <- survey_vineyards$`P mineral fertilization on fertilized fields (kgP/ha)`*P2O5_P_conversion_factor
+survey_vineyards$`P organic fertilization on fertilized fields (kgP/ha)` <- survey_vineyards$`P organic fertilization on fertilized fields (kgP/ha)`*P2O5_P_conversion_factor
+
+#convert K2O to K
+survey_vineyards$`K mineral fertilization on fertilized fields (kgK/ha)` <- survey_vineyards$`K mineral fertilization on fertilized fields (kgK/ha)`*K2O_K_conversion_factor
+survey_vineyards$`K organic fertilization on fertilized fields (kgK/ha)` <- survey_vineyards$`K organic fertilization on fertilized fields (kgK/ha)`*K2O_K_conversion_factor
+```
+
+The values reported here are the fertilization values on fields that are effectively fertilized. The survey also reports the % of fields that are fertilized. We compute the mean fertilization value (on all fields, including unfertilized fields) with the following relation:
+
+<div style="text-align: center;">*mean fertilization (on all fields) = (fertilization on fertilized fields) x (% of fertilized fields)*</div>
+
+```{r vineyard_extrapolation_ferti}
+survey_vineyards <- survey_vineyards %>%
+  mutate(
+    `N mineral mean fertilization (kgN/ha)` = `N mineral fertilization on fertilized fields (kgN/ha)`*`% mineral fertilization`/100,
+    `P mineral mean fertilization (kgP/ha)` = `P mineral fertilization on fertilized fields (kgP/ha)`*`% mineral fertilization`/100,
+    `K mineral mean fertilization (kgK/ha)` = `K mineral fertilization on fertilized fields (kgK/ha)`*`% mineral fertilization`/100,
+    `N organic mean fertilization (kgN/ha)` = `N organic fertilization on fertilized fields (kgN/ha)`*`% organic fertilization`/100,
+    `P organic mean fertilization (kgP/ha)` = `P organic fertilization on fertilized fields (kgP/ha)`*`% organic fertilization`/100,
+    `K organic mean fertilization (kgK/ha)` = `K organic fertilization on fertilized fields (kgK/ha)`*`% organic fertilization`/100
+  )
+
+#round all the values for better display in graphs and interactive table
+survey_vineyards <- survey_vineyards %>%
+    mutate_at(vars(-(`wine-growing basin`)) , round)
+```
+
+### Vizualize survey data on graphs {.tabset .tabset-fade .tabset-pills}
+
+You can see that in the *Fertilization* tab below, data for some wine basins are missing regarding organic fertilization (*Norg, Porg and Korg*). This is because because there were too few results and thus it was reported as "non significative".
+
+On the graphs, move mouse over graph to see more infos.
+
+```{r function_graph_vineyard_survey_by_basin}
+f_graph_vineyard_by_basin <- function(data, variable_y, y_max, breaks_legnth, y_label, title_label){
+
+  gg <- ggplot(data) +
+    geom_col(
+      aes(
+        reorder(`wine-growing basin`, {{ variable_y }}), {{ variable_y }}, 
+        text = paste(
+          as.character(`wine-growing basin`), "\n", 
+          as.character(signif({{ variable_y }}, 3)), y_label)
+          ),
+      fill = ifelse(
+        #have to filter when missing values, for the scale
+        data %>% filter(is.na({{ variable_y }})==F) %>% pull(`wine-growing basin`) == "France", 
+        "red", "grey"
+        )  # Highlight in red if "France"
+      ) +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1)
+    ) +
+    scale_y_continuous(
+      breaks = seq(0, y_max, by = breaks_legnth), 
+      limits = c(0, NA)
+      ) +
+    labs(
+      x="", color="", y=y_label, title = title_label
+      ) 
+  
+  return(ggplotly(gg, tooltip = c("text")))
+}
+
+f_graph_vineyard_by_basin_bis <- function(data, variable_y, y_max, breaks_legnth, y_label, title_label){
+
+  gg <- ggplot(data) +
+    geom_col(
+      aes(
+        reorder(`wine-growing basin`, {{ variable_y }}), {{ variable_y }}),
+        fill = ifelse(# Highlight in red if "France"
+          #have to filter when missing values, for the scale
+          data %>% filter(is.na({{ variable_y }})==F) %>% pull(`wine-growing basin`) == "France", 
+          "red", "grey"
+          )  
+      ) +
+    geom_text(
+      aes(`wine-growing basin`, {{ variable_y }}, label = {{ variable_y }}),
+      vjust=-0.2, fontface="italic"
+      ) +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1)
+    ) +
+    scale_y_continuous(
+      breaks = seq(0, y_max, by = breaks_legnth), 
+      limits = c(0, NA)
+      ) +
+    labs(
+      x="", color="", y=y_label, title = title_label
+      ) 
+  
+  return(gg)
+}
+```
+
+::: panel-tabset
+#### Mean Fertilization {.tabset .tabset-fade .tabset-pills}
+
+::: panel-tabset
+##### N min
+
+```{r vineyard_Nmin_mean, results=T}
+f_graph_vineyard_by_basin(survey_vineyards, `N mineral mean fertilization (kgN/ha)`, 100, 5, "(kgN/ha)", "Mean N mineral fertilization")
+```
+
+##### N org
+
+understand problem with graph function
+
+```{r vineyard_Norg_mean, results=T}
+# f_graph_vineyard_by_basin(survey_vineyards, `N organic mean fertilization (kgN/ha)`, 100, 5, "(kgN/ha)", "Mean N organic fertilization")
+```
+
+##### P min
+
+```{r vineyard_Pmin_mean, results=T}
+f_graph_vineyard_by_basin(survey_vineyards, `P mineral mean fertilization (kgP/ha)`, 100, 1, "(kgP/ha)", "Mean P mineral fertilization")
+```
+
+##### P org
+
+understand problem with graph function
+
+```{r vineyard_Porg_mean, results=T}
+# f_graph_vineyard_by_basin(survey_vineyards, `P organic mean fertilization (kgP/ha)`, 100, 1, "(kgP/ha)", "Mean P organic fertilization")
+```
+
+##### K min
+
+```{r vineyard_Kmin_mean, results=T}
+f_graph_vineyard_by_basin(survey_vineyards, `K mineral mean fertilization (kgK/ha)`, 100, 5, "(kgK/ha)", "Mean K mineral fertilization")
+```
+
+##### K org
+
+understand problem with graph function
+
+```{r vineyard_Korg_mean, results=T}
+# f_graph_vineyard_by_basin(survey_vineyards, `K organic mean fertilization (kgK/ha)`, 100, 5, "(kgK/ha)", "Mean K organic fertilization")
+```
+
+:::
+
+#### % Fields Fertilized {.tabset .tabset-fade}
+
+::: panel-tabset
+##### mineral
+
+```{r vineyard_percent_fertilized_min, results=T}
+f_graph_vineyard_by_basin(survey_vineyards, `% mineral fertilization`, 100, 10, "%", "% of fields with mineral fertilization")
+```
+
+##### organic
+
+```{r vineyard_percent_fertilized_orga, results=T}
+f_graph_vineyard_by_basin(survey_vineyards, `% organic fertilization`, 100, 10, "%", "% of fields with organic fertilization")
+```
+
+:::
+
+#### Fertilization on fertilized fields {.tabset .tabset-fade}
+
+::: panel-tabset
+##### N min
+
+```{r vineyard_Nmin_ferti, results=T}
+f_graph_vineyard_by_basin(survey_vineyards, `N mineral fertilization on fertilized fields (kgN/ha)`, 100, 5, "(kgN/ha)", "N mineral fertilization on fertilized fields")
+```
+
+##### N org
+
+understand problem with graph function
+
+```{r vineyard_Norg_ferti, results=T}
+# f_graph_vineyard_by_basin(survey_vineyards, `N organic fertilization on fertilized fields (kgN/ha)`, 100, 5, "(kgN/ha)", "N organic fertilization on fertilized fields")
+```
+
+##### P min
+
+```{r vineyard_Pmin_ferti, results=T}
+f_graph_vineyard_by_basin(survey_vineyards, `P mineral fertilization on fertilized fields (kgP/ha)`, 100, 1, "(kgP/ha)", "P mineral fertilization on fertilized fields")
+```
+
+##### P org
+
+understand problem with graph function
+
+```{r vineyard_Porg_ferti, results=T}
+# f_graph_vineyard_by_basin(survey_vineyards, `P organic fertilization on fertilized fields (kgP/ha)`, 100, 1, "(kgP/ha)", "P organic fertilization on fertilized fields")
+```
+
+##### K min
+
+```{r vineyard_Kmin_ferti, results=T}
+f_graph_vineyard_by_basin(survey_vineyards, `K mineral fertilization on fertilized fields (kgK/ha)`, 100, 5, "(kgK/ha)", "K mineral fertilization on fertilized fields")
+```
+
+##### K org
+
+understand problem with graph function
+
+```{r vineyard_Korg_ferti, results=T}
+# f_graph_vineyard_by_basin(survey_vineyards, `K organic fertilization on fertilized fields (kgK/ha)`, 100, 5, "(kgK/ha)", "K organic fertilization on fertilized fields")
+```
+
+:::
+
+#### Area, Yield, % Organics {.tabset .tabset-fade}
+
+::: panel-tabset
+##### area
+
+```{r vineyard_area, results=T}
+f_graph_vineyard_by_basin(survey_vineyards %>% filter(`wine-growing basin`!="France"), `area (ha)`/10^6, 1, 0.05, "Mha", "vineyard area") 
+```
+
+##### yield
+
+```{r vineyard_yield, results=T}
+f_graph_vineyard_by_basin(survey_vineyards, `yield (hl/ha)`, 100, 10, "hl/ha", "Yield by wine-growing basin")
+```
+
+##### % organic
+
+```{r vineyard_organic, results=T}
+f_graph_vineyard_by_basin(survey_vineyards, `% fields organic`, 100, 10, "%", "% of fields in organic agriculture")
+```
+
+
+:::
+:::
+
+### Explore survey data in a table
+
+Besides the graphs above, you can also interactively explore the data in the table below.
+
+```{r table_vineyards_2019, results=T}
+datatable(
+  survey_vineyards, options = list(scrollX = TRUE, responsive = TRUE)
+)
+```
+
+### Adapt data to regions {.tabset .tabset-fade .tabset-pills}
+
+The data from the Vineyards Cultural Practices Survey is detailed by wine basin and not by region. So we adapt the data by matching each region to one or several wine basins.
+
+You can see the match beween regions and wine basins in the interactive table below:
+
+```{r results=T}
+keys_vineyards_basins_regions <- read_csv("source/fertilization/practical_crop_surveys/2019_vineyards/keys_vineyard_basin_region.csv")
+
+datatable(
+  keys_vineyards_basins_regions, options = list(scrollX = TRUE, responsive = TRUE)
+  )
+```
+
+A better approach would be to have the geographical borders of each wine basin, and attribute each wine plot from our main dataset to a particular wine basin. However for now we did not find a geographical file corresponding to the wine basins reported in this Vineyards Cultural Practices Survey.
+
+With the Vineyards Cultural Practices Survey expressed in terms of regions and not in basins, the vineyards area by basin is not relevant anymore. For the other variables, when a region is associated to multiple wine basins, we take the simple mean of the basins. This is an approximation, as we should weight the values by the respective areas, but we do not have that data..
+
+```{r}
+#create the file of wine practices by region
+
+#prepare the data frame by region basis
+ferti_vineyards <- keys_vineyards_basins_regions %>%
+  #all (basin, regions) pairs grouped in 2 columns
+  gather(wine_basin, `wine-growing basin`, Basin_1:Basin_4) %>%
+  #remove NAs lines
+  drop_na() %>%
+  #remove useless column
+  select(-wine_basin)
+
+#join to the vineyards data by wine basin
+ferti_vineyards <-  left_join(ferti_vineyards, survey_vineyards, by="wine-growing basin")
+
+#when there are mulitple basins in 1 region, take the mean of the values
+ferti_vineyards <- ferti_vineyards %>%
+  #remove area by basin not relevant anymore
+  select(-`area (ha)`, -`wine-growing basin` ) %>%
+  #group by regions and take the mean
+  group_by(code_old_region, name_old_region) %>%
+  summarise_all(~mean(., na.rm = TRUE))
+#replace induced NaN by NAs
+ferti_vineyards[sapply(ferti_vineyards, is.nan)] <- NA
+
+#add the whole France value not catched by our lef_join : select whole France data and adds it to ferti_vineyards
+temp <- survey_vineyards %>% 
+  filter(`wine-growing basin` == "France") %>%
+  select(-`area (ha)`) %>%
+  rename(name_old_region = `wine-growing basin`) %>%
+  mutate(code_old_region = NA)
+ferti_vineyards <- bind_rows(ferti_vineyards, temp)
+
+#round all the values 
+ferti_vineyards <- ferti_vineyards %>%
+    mutate_at(vars(-c(code_old_region, name_old_region)), round)
+
+
+rm(temp)
+```
+
+This regionalized data will be used in our study, to match each vineyard plot to a fertilization leval, depending on the region it belongs to.
+
+```{r}
+#add crop fertilization label to merge with main file later
+ferti_vineyards <- ferti_vineyards %>%
+  mutate(crop_fertilization_label="Vignes")
+#save final fertilization file
+f_save_csv_files(
+  ferti_vineyards, 
+  "output/fertilization/fertilization_surveys/",
+  "fertilization_vineyards_by_old_region.csv")
+```
+
+
+### Vizualize regionalized data in graphs {.tabset .tabset-fade .tabset-pills}
+
+```{r function_graph_vineyard_survey_by_region}
+f_graph_vineyard_by_region <- function(data, variable_y, y_max, breaks_legnth, y_label, title_label){
+
+  gg <- ggplot(data) +
+    geom_col(
+      aes(
+        reorder(name_old_region, {{ variable_y }}), {{ variable_y }}, 
+        text = paste(
+          as.character(name_old_region), "\n", 
+          as.character(signif({{ variable_y }}, 3)), y_label)
+          ),
+      fill = ifelse(
+        #have to filter when missing values, for the scale
+        data %>% filter(is.na({{ variable_y }})==F) %>% pull(name_old_region) == "France", 
+        "red", "grey"
+        )  # Highlight in red if "France"
+      ) +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1)
+    ) +
+    scale_y_continuous(
+      breaks = seq(0, y_max, by = breaks_legnth), 
+      limits = c(0, NA)
+      ) +
+    labs(
+      x="", color="", y=y_label, title = title_label
+      ) 
+  
+  return(ggplotly(gg, tooltip = c("text")))
+}
+```
+
+::: panel-tabset
+#### Mean Fertilization {.tabset .tabset-fade .tabset-pills}
+
+::: panel-tabset
+##### N min
+
+```{r vineyard_region_Nmin_mean, results=T}
+f_graph_vineyard_by_region(ferti_vineyards, `N mineral mean fertilization (kgN/ha)`, 100, 5, "(kgN/ha)", "Mean N mineral fertilization")
+```
+
+##### N org
+
+understand problem with graph function
+
+```{r vineyard_region_Norg_mean, results=T}
+# f_graph_vineyard_by_region(ferti_vineyards, `N organic mean fertilization (kgN/ha)`, 100, 5, "(kgN/ha)", "Mean N organic fertilization")
+```
+
+##### P min
+
+```{r vineyard_region_Pmin_mean, results=T}
+f_graph_vineyard_by_region(ferti_vineyards, `P mineral mean fertilization (kgP/ha)`, 100, 1, "(kgP/ha)", "Mean P mineral fertilization")
+```
+
+##### P org
+
+understand problem with graph function
+
+```{r vineyard_region_Porg_mean, results=T}
+# f_graph_vineyard_by_region(ferti_vineyards, `P organic mean fertilization (kgP/ha)`, 100, 1, "(kgP/ha)", "Mean P organic fertilization")
+```
+
+##### K min
+
+```{r vineyard_region_Kmin_mean, results=T}
+f_graph_vineyard_by_region(ferti_vineyards, `K mineral mean fertilization (kgK/ha)`, 100, 5, "(kgK/ha)", "Mean K mineral fertilization")
+```
+
+##### K org
+
+understand problem with graph function
+
+```{r vineyard_region_Korg_mean, results=T}
+# f_graph_vineyard_by_region(ferti_vineyards, `K organic mean fertilization (kgK/ha)`, 100, 5, "(kgK/ha)", "Mean K organic fertilization")
+```
+
+
+:::
+
+#### % Fields Fertilized {.tabset .tabset-fade}
+
+::: panel-tabset
+##### mineral
+
+```{r vineyard_region_percent_fertilized_min, results=T}
+f_graph_vineyard_by_region(ferti_vineyards, `% mineral fertilization`, 100, 10, "%", "% of fields with mineral fertilization")
+```
+
+##### organic
+
+```{r vineyard_region_percent_fertilized_orga, results=T}
+f_graph_vineyard_by_region(ferti_vineyards, `% organic fertilization`, 100, 10, "%", "% of fields with organic fertilization")
+```
+
+:::
+
+#### Fertilization on fertilized fields {.tabset .tabset-fade}
+
+::: panel-tabset
+
+##### N min
+
+```{r vineyard_region_Nmin_ferti, results=T}
+f_graph_vineyard_by_region(ferti_vineyards, `N mineral fertilization on fertilized fields (kgN/ha)`, 100, 5, "(kgN/ha)", "N mineral fertilization on fertilized fields")
+```
+
+##### N org
+
+understand problem with graph function
+
+```{r vineyard_region_Norg_ferti, results=T}
+# f_graph_vineyard_by_region(ferti_vineyards, `N organic fertilization on fertilized fields (kgN/ha)`, 100, 5, "(kgN/ha)", "N organic fertilization on fertilized fields")
+```
+
+##### P min
+
+```{r vineyard_region_Pmin_ferti, results=T}
+f_graph_vineyard_by_region(ferti_vineyards, `P mineral fertilization on fertilized fields (kgP/ha)`, 100, 1, "(kgP/ha)", "P mineral fertilization on fertilized fields")
+```
+
+##### P org
+
+understand problem with graph function
+
+```{r vineyard_region_Porg_ferti, results=T}
+# f_graph_vineyard_by_region(ferti_vineyards, `P organic fertilization on fertilized fields (kgP/ha)`, 100, 1, "(kgP/ha)", "P organic fertilization on fertilized fields")
+```
+
+##### K min
+
+```{r vineyard_region_Kmin_ferti, results=T}
+f_graph_vineyard_by_region(ferti_vineyards, `K mineral fertilization on fertilized fields (kgK/ha)`, 100, 5, "(kgK/ha)", "K mineral fertilization on fertilized fields")
+```
+
+##### K org
+
+understand problem with graph function
+
+```{r vineyard_region_Korg_ferti, results=T}
+# f_graph_vineyard_by_region(ferti_vineyards, `K organic fertilization on fertilized fields (kgK/ha)`, 100, 5, "(kgK/ha)", "K organic fertilization on fertilized fields")
+```
+
+
+:::
+
+#### Yield, % Organics {.tabset .tabset-fade}
+
+::: panel-tabset
+##### yield
+
+```{r vineyard_region_yield, results=T}
+f_graph_vineyard_by_region(ferti_vineyards, `yield (hl/ha)`, 100, 10, "hl/ha", "Yield by wine-growing basin")
+```
+
+##### % organic
+
+```{r vineyard_region_organic, results=T}
+f_graph_vineyard_by_region(ferti_vineyards, `% fields organic`, 100, 10, "%", "% of fields in organic agriculture")
+```
+
+:::
+
+:::
+
+### Explore regionalized data in a table
+
+Besides the graphs above, you can also interactively explore the data in the table below.
+
+```{r table_vineyards_regions_2019, results=T}
+datatable(
+  ferti_vineyards, options = list(scrollX = TRUE, responsive = TRUE)
+)
+```
+
+
+```{r remove_vineyars_temporary_files}
+#remove temporary files
+rm(keys_vineyards_basins_regions)
+```
+
+
+```{r}
+#save graphs for manuscript
+
+#function to prepare mineral and organic N ferti, by wine-growin basin or Franch region
+f_prepare <- function(dataset, region){
+  #focus on N mineral and organic ferti
+  dataset <- dataset %>%
+    ungroup() %>%
+    select({{ region }}, `mineral fertilization` = `N mineral mean fertilization (kgN/ha)`, `organic fertilization` = `N organic mean fertilization (kgN/ha)`) %>%
+    gather(variable, value, -{{ region }})
+  
+  # Reorder by ascending mineral value
+  dataset <- dataset %>%
+    mutate({{ region }} := factor(
+      {{ region }},
+      levels = dataset %>% filter(variable == "mineral fertilization") %>% arrange(desc(value)) %>% pull({{ region }})
+    ))
+  
+  return(dataset)
+}
+
+#function for vineyards fertilization manuscript graph
+f_graph <- function(dataset, region, title_label){
+  #graph
+  gg <- ggplot(dataset) +
+      geom_col(
+        aes({{ region }}, value),
+        fill = ifelse(# Highlight in red if "France"
+          dataset %>% pull({{ region }}) == "France", 
+          "red", "grey"
+          )  
+        ) +
+      geom_text(
+        aes({{ region }}, value, label = value),
+        hjust=-0.2, fontface="italic"
+        ) +
+      theme(
+        axis.text.x = element_text(angle = 45, hjust = 1)
+      ) +
+      scale_y_continuous(
+        breaks = seq(0, 100, by = 5), 
+        limits = c(0, 50)
+        ) +
+      labs(
+        x="", color="", y="kgN/ha", subtitle = title_label
+        ) +
+    facet_wrap(vars(variable), ) +
+    coord_flip()
+  
+  return(gg)
+  
+}
+
+#graph wine growing regions
+temp <- f_prepare(survey_vineyards, `wine-growing basin`)
+gg1 <- f_graph(temp, `wine-growing basin`, "by wine-growing basin")
+
+#graph French regions
+temp <- f_prepare(ferti_vineyards, name_old_region)
+gg2 <- f_graph(temp, name_old_region, "by French region")
+
+
+gg <- gg1 + gg2 +plot_layout(ncol = 1)
+gg
+
+f_save_graph_pdf_png(
+  gg, "graph/fertilization_values/", "vineyards_fertilization",
+  350, 9, 7
+)
+```
+
+
+# AND International Report
+
+Despite the French surveys and our extrapolations, there are still many crops that are not covered by our fertilization data: orchards, vegetables and floral crops.
+
+For these crops, we use data from a [report](https://agriculture.gouv.fr/etude-prospective-sur-lestimation-des-besoins-actuels-et-futurs-de-lagriculture-biologique-en){target="_blank"} produced by the consultancy firm [AND international ](https://www.and-international.com/fr/qui-sommes-nous/){target="_blank"} for the French Ministry of Agriculture.
+
+They estimate the fertilization needs for organic agriculture, expressed as mineral fertilization equivalent. They do this from the mean expected yield. For our crops, they usually do this from usual conventional yields. Using their figure would not be appropriate for other crops (namely major crops such as wheat) where they specifically use organic yields, which are lower. 
+
+These data about theoretical needs are less relevant than the practices surveys. However they concern crops that have much smaller areas than the major crops, and so the margin of error is smaller.
+
+## Estimation share mineral / organic fertilization {.tabset .tabset-fade .tabset-pills}
+
+The figures mentioned above only concern the fertilization "requirements". However that does not specify how much of this is fulfilled with mineral fertilizers. We hypothesize an order of magnitude, based on the distribution between organic and mineral fertilizer in major crops and vineyards.
+
+For vineyards, mineral nitrogen is about 50% of total fertilization.
+
+For major crops, most of them are about 75% mineral N or above. The exceptions are: leguminous crops (féverole, pois protéagineux, soja), at most 25%, and livestock fodder (ma¨s fourrage and prairies permanentes) around 50%.
+
+For the following, we will take as an order of magnitude 66% of crops needs covered by mineral fertilization.
+
+
+::: panel-tabset
+### Major crops
+
+```{r share_mineral_organic_major_crops, results=T}
+#take major crops values and compute distribution between mineral and organic
+temp <- survey_major_crops %>%
+  select(
+    crop_fertilization_label,
+    name_old_region,
+    Nmin = `N mineral mean fertilization (kgN/ha)`,
+    Norg = `N organic mean fertilization (kgN/ha)`
+    )  %>%
+  mutate(
+    percent_N_mineral = round(Nmin/(Nmin+Norg), 2)*100
+  )
+
+#vizualize result
+gg <- ggplot(temp) +
+  geom_point(
+    aes(reorder(crop_fertilization_label, percent_N_mineral),
+        percent_N_mineral, color=name_old_region),
+    position = position_nudge(x = .5), alpha=.4
+    ) +
+  geom_boxplot(
+    aes(reorder(crop_fertilization_label, percent_N_mineral), percent_N_mineral),
+    position = position_nudge(x = -.2)
+    ) +
+  theme(
+    axis.text.x = element_text(angle=45, h=1),
+    ) +
+  scale_y_continuous(labels = scales::label_percent(scale = 1)) +
+  labs(x="", y="% N mineral", fill="(old) region")
+ggplotly(gg)
+```
+
+### Vineyards
+
+```{r share_mineral_organic_vineyards, results=T}
+#take major crops values and compute distribution between mineral and organic
+temp <- survey_vineyards %>%
+  select(
+    `wine-growing basin`,
+    Nmin = `N mineral mean fertilization (kgN/ha)` ,
+    Norg = `N organic mean fertilization (kgN/ha)`,
+    Pmin = `P mineral mean fertilization (kgP/ha)` ,
+    Porg = `P organic mean fertilization (kgP/ha)`,
+    Kmin = `K mineral mean fertilization (kgK/ha)` ,
+    Korg = `K organic mean fertilization (kgK/ha)`,
+    ) %>%
+  mutate(
+    nitrogen = round(Nmin/(Nmin+Norg), 2)*100,
+    phosphorus = round(Pmin/(Pmin+Porg), 2)*100,
+    potassium = round(Kmin/(Kmin+Korg), 2)*100
+  ) %>%
+  select(`wine-growing basin`, nitrogen, phosphorus, potassium) %>%
+  gather(mineral, value, -`wine-growing basin`)
+
+#vizualize result
+gg <- ggplot(temp) +
+  geom_point(
+    aes(
+      value,
+      reorder(`wine-growing basin`, value), color=mineral
+      )
+    ) +
+  theme(
+    axis.text.x = element_text(angle=45, h=1),
+    ) +
+  scale_x_continuous(
+    labels = scales::label_percent(scale = 1)
+    ) +
+  labs(
+    x="% mineral fertilization", y="", fill="nutrient",
+    title = ""
+    )
+ggplotly(gg)
+
+ggplot(temp) +
+  geom_boxplot(aes(mineral, value, fill=mineral), alpha=.7) +
+  theme(axis.text.x = element_text(angle=45, h=1)) +
+  labs(x="", y="% N mineral")
+
+#remove temporary variable
+rm(temp, gg)
+```
+
+:::
+
+## Orchards
+
+Here we present the values we use for Orchards mineral fertilization, based on page 58 of the [report](https://agriculture.gouv.fr/etude-prospective-sur-lestimation-des-besoins-actuels-et-futurs-de-lagriculture-biologique-en){target="_blank"}. We do not include grapes, which are already in the vineyards data.
+
+Note that our values are only 2/3 of the report values, since we estimate that mineral fertilization represents about 2/3 of the crops "requirements".
+
+```{r load_and_prepare_orchards}
+#load values
+ferti_orchards <- read_csv("source/fertilization/AND_international_estimations/fertilization_requirements_orchards.csv")
+
+#values *2/3, share of mineral fertilization
+ferti_orchards <- ferti_orchards %>%
+  mutate(
+    `N mineral mean fertilization (kgN/ha)` = `kgN/ha`*2/3,
+    `P mineral mean fertilization (kgP/ha)` = `kgP/ha`*2/3,
+    `K mineral mean fertilization (kgK/ha)` = `kgK/ha`*2/3,
+    `N organic mean fertilization (kgN/ha)` = `kgN/ha`*1/3
+  ) %>%
+  select(-`kgN/ha`, -`kgP/ha`, -`kgK/ha`)
+
+#save values
+f_save_csv_files(
+  ferti_orchards, 
+  "output/fertilization/",
+  "fertilization_orchards_by_crop.csv"
+  )
+
+#graph function to see the values
+f_graph_orchards <- function(data, variable_y, y_max, breaks_legnth, y_label, title_label){
+
+  gg <- ggplot(data) +
+    geom_col(
+      aes(
+        reorder(crop_fertilization_label, {{ variable_y }}), {{ variable_y }}, 
+        text = paste(
+          as.character(crop_fertilization_label), "\n", 
+          as.character(signif({{ variable_y }}, 3)), y_label)
+          )
+      ) +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1)
+      ) +
+    scale_y_continuous(
+      breaks = seq(0, y_max, by = breaks_legnth),
+      limits = c(0, NA)
+      ) +
+    labs(
+      x="", color="", y=y_label, title = title_label
+      ) 
+  
+  return(ggplotly(gg, tooltip = c("text")))
+}
+```
+
+
+::: panel-tabset
+### N mineral
+
+```{r orchards_N_graph, results=T}
+f_graph_orchards(ferti_orchards, `N mineral mean fertilization (kgN/ha)`, 450, 50, "kgN/ha", "Orchards N fertilization requirements")
+```
+
+### P mineral
+
+```{r orchards_P_graph, results=T}
+f_graph_orchards(ferti_orchards, `P mineral mean fertilization (kgP/ha)`, 150, 20, "kgP/ha", "Orchards P fertilization requirements")
+```
+
+### K mineral
+
+```{r orchards_K_graph, results=T}
+f_graph_orchards(ferti_orchards, `K mineral mean fertilization (kgK/ha)`, 500, 50, "kgK/ha", "Orchards N fertilization requirements")
+```
+:::
+
+## Vegetables and Floral Crops
+
+Here we present the values we use for Vegetables and Floral Crops mineral fertilization, based on page 54 of the [report](https://agriculture.gouv.fr/etude-prospective-sur-lestimation-des-besoins-actuels-et-futurs-de-lagriculture-biologique-en){target="_blank"}. We also include mustard (p50) and tobacco (p59)
+
+Note that our values are only 2/3 of the report values, since we estimate that mineral fertilization represents about 2/3 of the crops "requirements".
+
+```{r load_and_prepare_vegetables_and_floral}
+#load values
+ferti_vegetables_floral <- read_csv("source/fertilization/AND_international_estimations/fertilization_requirements_vegetables_floral.csv")
+
+#values *2/3, share of mineral fertilization
+ferti_vegetables_floral <- ferti_vegetables_floral %>%
+  mutate(
+    `N mineral mean fertilization (kgN/ha)` = `kgN/ha`*2/3,
+    `P mineral mean fertilization (kgP/ha)` = `kgP/ha`*2/3,
+    `K mineral mean fertilization (kgK/ha)` = `kgK/ha`*2/3,
+    `N organic mean fertilization (kgN/ha)` = `kgN/ha`*1/3
+  ) %>%
+  select(-`kgN/ha`, -`kgP/ha`, -`kgK/ha`)
+
+#save values
+f_save_csv_files(
+  ferti_vegetables_floral, 
+  "output/fertilization/",
+  "fertilization_vegetables_floral.csv"
+  )
+
+#graph function to see the values
+f_graph_vegetables_floral <- function(data, variable_y, y_max, breaks_legnth, y_label, title_label){
+
+  gg <- ggplot(data) +
+    geom_col(
+      aes(
+        reorder(crop_fertilization_label, {{ variable_y }}), {{ variable_y }}, 
+        text = paste(
+          as.character(crop_fertilization_label), "\n", 
+          as.character(signif({{ variable_y }}, 3)), y_label)
+          )
+      ) +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1)
+      ) +
+    scale_y_continuous(
+      breaks = seq(0, y_max, by = breaks_legnth),
+      limits = c(0, NA)
+      ) +
+    labs(
+      x="", color="", y=y_label, title = title_label
+      ) 
+  
+  return(ggplotly(gg, tooltip = c("text")))
+}
+```
+
+::: panel-tabset
+### N mineral
+
+```{r vegetables_floral_N_graph, results=T}
+f_graph_vegetables_floral(ferti_vegetables_floral, `N mineral mean fertilization (kgN/ha)`, 450, 50, "kgN/ha", "Vegetables and floral crops N fertilization requirements")
+```
+
+### P mineral
+
+```{r vegetables_floral_P_graph, results=T}
+f_graph_vegetables_floral(ferti_vegetables_floral, `P mineral mean fertilization (kgP/ha)`, 150, 20, "kgP/ha", "Vegetables and floral crops P fertilization requirements")
+```
+
+### K mineral
+
+```{r vegetables_floral_K_graph, results=T}
+f_graph_vegetables_floral(ferti_vegetables_floral, `K mineral mean fertilization (kgK/ha)`, 500, 50, "kgK/ha", "Vegetables and floral crops N fertilization requirements")
+```
+:::
+
+
+```{r remove_all_objects_in_environment}
+rm(list = ls())
+```
+
+
+<!-- # Appendix: 2005 majorg crops French Practical Crop Survey -->
+
+<!-- This is only a first exploratory draft, and you can ignore it. -->
+
+<!-- The results of this 2005 survey is not reported in Agreste but is reported in a scientific [article](https://www-sciencedirect-com.extranet.enpc.fr/science/article/pii/S0048969718322782), and more precisely in it accompanying data in brief [paper](https://www-sciencedirect-com.extranet.enpc.fr/science/article/pii/S2352340918311971), in the supplementary materials. -->
+
+<!-- We hope to use this data in the future for 2 main purposes : -->
+
+<!--   - first, this data estimates the time of year when fertilizers are spread. Maybe we will use this for our study. -->
+<!--   - second, contrary to the 2017 public data, regionalized values are reported for temporary and permanent grasslands. Maybe this can be used to regionalize our 2017 values (through a multiplicative coefficient). -->
+
+<!-- Here all the data are only for mineral N fertilization. -->
+
+<!-- ```{r load_data} -->
+<!-- path <- "source/fertilization/practical_crop_surveys/2005_major_crops_leys_grasslands/mineral_application_2005.csv" -->
+<!-- survey_2005 <- read_csv(path)  -->
+<!-- rm(path) -->
+<!-- ``` -->
+
+<!-- ## Fertilization levels {.tabset .tabset-fade .tabset-pills} -->
+
+<!-- Not completely clear which option is the right one. Options 1 : reported fertilization corrected by the % of fields effectively fertilized. Option 2 : reported fertilization. I think option 1 is the rught one. -->
+
+<!-- ```{r prepare_fertilization_levels} -->
+<!-- #summarize fertilization byr region and crop -->
+<!-- temp <- survey_2005 %>% -->
+<!--   select(region, crop, percent_fields_fertilized, kgN_ha_management) %>% -->
+<!--   distinct() %>% -->
+<!--   group_by(region, crop, percent_fields_fertilized) %>% -->
+<!--   # We take the sum of all the management practices fertilization (they already consider the relative share of each management practice) -->
+<!--   summarise( -->
+<!--     mean_fertilization_N_option1 = round(sum(kgN_ha_management)*percent_fields_fertilized/100), -->
+<!--     mean_fertilization_N_option2 = round(sum(kgN_ha_management)) -->
+<!--   ) %>% -->
+<!--   distinct()  -->
+<!-- ``` -->
+
+<!-- ```{r f_graph_fertilization_levels} -->
+<!-- f_graph_fertilization_levels <- function(dataset, x_variable, color_variable, fertilization_potion){ -->
+<!--   gg <- ggplot(dataset) + -->
+<!--     geom_point( -->
+<!--       aes( -->
+<!--         x=reorder({{ x_variable }}, {{ fertilization_potion }}),  -->
+<!--         y={{ fertilization_potion }},  -->
+<!--         color={{ color_variable }}) -->
+<!--       ) + -->
+<!--     labs(x="", y="kgN/ha", color="") + -->
+<!--     theme(axis.text.x = element_text(angle=45, h=1)) -->
+
+<!--   return(ggplotly(gg)) -->
+
+<!-- } -->
+<!-- ``` -->
+
+<!-- ### Option 1 {.tabset .tabset-fade} -->
+
+<!-- #### by region -->
+
+<!-- ```{r option1_region, results=T, out.width='100%'} -->
+<!-- f_graph_fertilization_levels(temp, region, crop, mean_fertilization_N_option1) -->
+<!-- ``` -->
+
+<!-- #### by crop -->
+
+<!-- ```{r option1_crop, results=T, out.width='100%'} -->
+<!-- f_graph_fertilization_levels(temp, crop, region, mean_fertilization_N_option1) -->
+<!-- ``` -->
+
+<!-- ### Option 2 {.tabset .tabset-fade} -->
+
+<!-- #### by region -->
+
+<!-- ```{r option2_region, results=T, out.width='100%'} -->
+<!-- f_graph_fertilization_levels(temp, region, crop, mean_fertilization_N_option2) -->
+<!-- ``` -->
+
+<!-- #### by crop -->
+
+<!-- ```{r option2_crop, results=T, out.width='100%'} -->
+<!-- f_graph_fertilization_levels(temp, crop, region, mean_fertilization_N_option2) -->
+<!-- ``` -->
+
+<!-- ## Fertilization pairs (crop x region) {.tabset .tabset-fade .tabset-pills} -->
+
+<!-- ```{r fertilization_source, results=T} -->
+<!-- # Surveyed pairs (crops, region), i.e. region == region_source -->
+<!-- region_crop_surveyed <- survey_2005 %>% -->
+<!--   select(crop, region, region_source) %>% -->
+<!--   filter(region == region_source) %>% -->
+<!--   distinct()  -->
+
+<!-- # Extrapolated pairs (crops, region) from another region, i.e. region != region_source -->
+<!-- region_crop_extrapolated <- survey_2005 %>%  -->
+<!--   select(crop, region, region_source) %>%  -->
+<!--   filter(region != region_source) %>% -->
+<!--   distinct() -->
+
+<!-- # Create all (crop, region) pairs possible -->
+<!-- all_pairs <- expand.grid( -->
+<!--   crop = unique(survey_2005$crop),  -->
+<!--   region = unique(survey_2005$region) -->
+<!--   ) -->
+
+<!-- # Add variable indicating if fertilization value surveyed, extrapolated or absent from dataset -->
+<!-- all_pairs$fertilization <- ifelse( -->
+<!--   do.call(paste, all_pairs) %in% do.call(paste, region_crop_surveyed %>% select(-region_source)), -->
+<!--   "Surveyed", -->
+<!--   ifelse( -->
+<!--     do.call(paste, all_pairs) %in% do.call(paste, region_crop_extrapolated %>% select(-region_source)), -->
+<!--     "Extrapolated from\nother surveyed region", -->
+<!--     "Not Surveyed" -->
+<!--   ) -->
+<!-- ) -->
+
+<!-- # Add the origin region -->
+<!-- all_pairs <- left_join( -->
+<!--   all_pairs,  -->
+<!--   survey_2005 %>% select(region, region_source, crop) %>% distinct(),  -->
+<!--   by=c("crop", "region") -->
+<!-- ) -->
+
+<!-- # Create a plot -->
+<!-- gg <-  -->
+<!--   ggplot( -->
+<!--     all_pairs,  -->
+<!--     aes( -->
+<!--       x = crop, y = region, fill = fertilization,  -->
+<!--       text=paste("Fertilization value source:\n", region_source) -->
+<!--       ) -->
+<!--   ) + -->
+<!--   geom_tile(color = "white") + -->
+<!--   scale_fill_manual( -->
+<!--     values = c("Surveyed" = "green", "Extrapolated from\nother surveyed region" = "orange", "Not Surveyed" = "red") -->
+<!--     ) + -->
+<!--   labs( -->
+<!--     title = "Source of mineral fertilization practice", x = "", y = "", fill="" -->
+<!--     ) + -->
+<!--   theme( -->
+<!--     axis.text.x = element_text(angle=45, h=1) -->
+<!--     ) -->
+<!-- ggplotly(gg, tooltip = c("text")) -->
+
+<!-- rm(region_crop_surveyed, region_crop_extrapolated, all_pairs) -->
+<!-- ``` -->
+
+<!-- ## Fertilization calendar {.tabset .tabset-fade .tabset-pills} -->
+
+<!-- ```{r} -->
+<!-- temp <- survey_2005 %>%  -->
+<!--   select(-region_source, -percent_fields_fertilized, -kgN_ha_management) -->
+
+<!-- temp <- temp %>% -->
+<!--   mutate(ID = row_number()) -->
+
+<!-- temp <- temp %>% -->
+<!--   gather( -->
+<!--     fortnight, temporal_distribution,  -->
+<!--     -region, -crop, -ID, -management, -application_fertilizer, -percent_management, -percent_application, -kgN_ha_application -->
+<!--     ) %>% -->
+<!--   filter(is.na(temporal_distribution)==F) -->
+
+<!-- temp <- temp %>% -->
+<!--   mutate( -->
+<!--     temp_distri_manag = temporal_distribution*percent_management/100, -->
+<!--     temp_distri_manag_appli = temporal_distribution*percent_management*percent_application/10000, -->
+<!--     temp_distri_manag_appli_ferti = temporal_distribution*percent_management*percent_application*kgN_ha_application/10000 -->
+<!--   ) -->
+
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- library(ggridges) -->
+<!-- # Generate a sequence of indices for the fortnight values you want to display -->
+<!-- fortnight_indices <- seq(1, length.out = length(unique(temp$fortnight)) / 2, by = 4) -->
+<!-- selected_crop <- "Barley" -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- f_graph_fertilization_calendar <- function(dataset, selected_crop, y_variable){ -->
+
+<!--   max <- max(dataset %>% filter(crop==selected_crop) %>% pull({{ y_variable }}), na.rm=T) -->
+
+
+<!--   gg <- ggplot(dataset %>% filter(crop==selected_crop)) + -->
+<!--     geom_ridgeline( -->
+<!--       aes( -->
+<!--         x=fortnight, y = as.factor(management), -->
+<!--         group=as.factor(ID), height = {{ y_variable }},  -->
+<!--         fill=application_fertilizer -->
+<!--         ), -->
+<!--       alpha=.4, color="black", scale=1/max -->
+<!--       ) + -->
+<!--     theme( -->
+<!--       axis.text.x = element_text(angle=45, h=1) -->
+<!--     ) + -->
+<!--     facet_wrap(~region)  + -->
+<!--     geom_vline(xintercept = "2006011q", linetype="dashed") + -->
+<!--     scale_x_discrete(breaks = sort(unique(dataset$fortnight))[fortnight_indices]) + -->
+<!--     labs(fill="fertilizer application", y="management practice") -->
+
+<!--   return(gg) -->
+
+<!-- } -->
+
+<!-- ``` -->
+
+<!-- ### unweighted -->
+
+<!-- ```{r} -->
+<!-- f_graph_fertilization_calendar(temp, selected_crop, temporal_distribution) -->
+<!-- ``` -->
+
+<!-- ### weighted % management -->
+
+<!-- ```{r} -->
+<!-- f_graph_fertilization_calendar(temp, selected_crop, temp_distri_manag) -->
+<!-- ``` -->
+
+<!-- ### weighted % management x % application -->
+
+<!-- ```{r} -->
+<!-- f_graph_fertilization_calendar(temp, selected_crop, temp_distri_manag_appli) -->
+<!-- ``` -->
+
+<!-- ### weighted % management x % application x fertilization -->
+
+<!-- ```{r} -->
+<!-- f_graph_fertilization_calendar(temp, selected_crop, temp_distri_manag_appli_ferti) -->
+<!-- ``` -->
+
+<!-- ## -->
+
+<!-- to see the mode of the ditribution and selec 1 date -->
+
+<!-- ```{r} -->
+<!-- max <- max(temp %>% filter(crop==selected_crop) %>% pull(temp_distri_manag_appli_ferti), na.rm=T) -->
+<!-- ggplot(temp %>% filter(crop==selected_crop)) + -->
+<!--   geom_ridgeline( -->
+<!--     aes( -->
+<!--       x=fortnight, y = as.factor(application_fertilizer), -->
+<!--       group=as.factor(ID), height = temp_distri_manag_appli_ferti,  -->
+<!--       fill=application_fertilizer -->
+<!--       ), -->
+<!--     alpha=.4, color="black", scale=1/max -->
+<!--     ) + -->
+<!--   theme( -->
+<!--     axis.text.x = element_text(angle=45, h=1) -->
+<!--   ) + -->
+<!--   facet_wrap(~management)  -->
+<!-- ``` -->
+
+
+<!-- Extrapolation of 2017 and 2005 surveys. -->
+
+<!-- ```{r} -->
+<!-- # Surveyed pairs (crops, region), i.e. region == region_source -->
+<!-- region_crop_surveyed_2005 <- survey_2005 %>% -->
+<!--   select(crop, region, region_source) %>% -->
+<!--   filter(region == region_source) %>% -->
+<!--   distinct()  -->
+
+<!-- # Extrapolated pairs (crops, region) from another region, i.e. region != region_source -->
+<!-- region_crop_extrapolated_2005 <- survey_2005 %>%  -->
+<!--   select(crop, region, region_source) %>%  -->
+<!--   filter(region != region_source) %>% -->
+<!--   distinct() -->
+
+<!-- # Create all (crop, region) pairs possible -->
+<!-- all_pairs_2005 <- expand.grid( -->
+<!--   crop = unique(survey_2005$crop),  -->
+<!--   region = unique(survey_2005$region) -->
+<!--   ) -->
+
+<!-- # Add variable indicating if fertilization value surveyed, extrapolated or absent from dataset -->
+<!-- all_pairs_2005$fertilization <- ifelse( -->
+<!--   do.call(paste, all_pairs_2005) %in% do.call(paste, region_crop_surveyed_2005 %>% select(-region_source)), -->
+<!--   "Surveyed", -->
+<!--   ifelse( -->
+<!--     do.call(paste, all_pairs_2005) %in% do.call(paste, region_crop_surveyed_2005 %>% select(-region_source)), -->
+<!--     "Extrapolated from\nother surveyed region", -->
+<!--     "Not Surveyed" -->
+<!--   ) -->
+<!-- ) -->
+
+<!-- # Add the origin region -->
+<!-- all_pairs_2005 <- left_join( -->
+<!--   all_pairs_2005,  -->
+<!--   survey_2005 %>% select(region, region_source, crop) %>% distinct(),  -->
+<!--   by=c("crop", "region") -->
+<!-- ) -->
+
+<!-- ``` -->
+
+
+
+<!-- ```{r} -->
+
+<!-- ``` -->
+

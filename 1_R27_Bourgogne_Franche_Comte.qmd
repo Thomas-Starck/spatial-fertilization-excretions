@@ -1,0 +1,12 @@
+---
+title: "Centre-Vale de Loire"
+---
+
+```{r select_region}
+region <- "Bourgogne-Franche-Comté"
+path_region <- "Bourgogne_Franche_Comte"
+```
+
+```{r autodoc, child='1_regions_preparation.qmd', eval=TRUE}
+#common part of the document to all the regions, stored in the 0_regions_preparation.rmd file
+``` 

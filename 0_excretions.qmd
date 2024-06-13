@@ -1,0 +1,917 @@
+---
+title: "Excretions"
+---
+
+TO BE DONE : 
+
+  - reorder preparation and map beginning
+  
+  
+ajouter nom régions et départements
+
+```{r setup, include=T, message=F, warning=F}
+knitr::opts_chunk$set(message=F, warning=F, results=F, fig.align = "center",  dev='png')
+
+# Load the function file common to all pages
+source("functions.R")
+#included:
+#-function to save csv f_save_csv_files
+#-set the default scale_color and scale_fill to viridis theme
+#-loads the core tidyverse package
+
+library(arrow) #to read and write parquet file, and set objects to arrow tables
+library(sf)
+library(cowplot)
+
+#set theme for graphs
+theme_set(
+  theme_classic() +
+  theme(
+    panel.grid.major.y = element_line(), #no vertical lines by default
+    #text = element_text(family = "Times New Roman"), #default font
+    plot.title = element_text(face="bold"), #graphs titles in bolds
+    )
+  )
+
+CRS_RGF93_Lambert93 <- 2154 # number of coordinate projection system used for France (Réseau Géodésique Français 1993 - Lambert 93)
+
+# molar mass K : 39, O : 16
+K2O_K_conversion_factor <- (2*39)/(2*39+16)
+# molar mass P : 31, O : 16
+P2O5_P_conversion_factor <- (2*31)/(2*31+5*16)
+```
+
+```{r load_geo_data_nationaLregional_and_communes}
+#load map regions and create a whole France polygon from this
+sf_regions <- sf::st_read("source/maps/all_French_admin_units/ADMIN-EXPRESS-COG_2-1__SHP__FRA_2020-11-20/ADMIN-EXPRESS-COG/1_DONNEES_LIVRAISON_2020-11-20/ADE-COG_2-1_SHP_LAMB93_FR/REGION.shp")
+sf_france <- st_union(sf_regions)
+rm(sf_regions)
+
+#load map communes
+sf_communes <- sf::st_read("source/maps/all_French_admin_units/ADMIN-EXPRESS-COG_2-1__SHP__FRA_2020-11-20/ADMIN-EXPRESS-COG/1_DONNEES_LIVRAISON_2020-11-20/ADE-COG_2-1_SHP_LAMB93_FR/COMMUNE.shp")
+#keep columns of interest from 
+sf_communes <- sf_communes %>% select(
+  code_commune = INSEE_COM, name_commune = NOM_COM, 
+  code_department = INSEE_DEP, code_region = INSEE_REG,
+  population_sf = POPULATION
+  )
+
+
+#load map old regions and convert it into our Coordinate Reference System
+sf_old_regions <- sf::st_read("/Users/thomasstarck/Desktop/sites/spatial-excretions-fertilization/source/maps/old_regions/regions-20140306-5m.shp")
+sf_old_regions <- st_transform(sf_old_regions, CRS_RGF93_Lambert93)
+```
+
+# Load and prepare data
+
+::: panel-tabset
+## Population by communes
+
+I convert the population in each French commune to nutrient excretions. This is obtained by combining population data with data reported in the INCA3 study, that I already investigated in a previous [project](https://thomas-starck.github.io/n-p-sanitation-flows/0_nutrient_excretions.html){target="_blank"} (see figures in *Nutrient intakes by age and sex -> Tables*). 
+
+Population data by commune and by age comes from [INSEE](https://www.insee.fr/fr/statistiques/1893204){target="_blank"}, and its reference year is 2018.
+
+```{r compute_population_and_excretion_by_commune}
+#load file
+population_communes <- 
+  readxl::read_excel(
+    "source/population/population_by_commune/pop-sexe-age-quinquennal6818.xls", 
+    sheet = "COM_2018",skip=13
+    )
+
+# check factors here https://thomas-starck.github.io/n-p-sanitation-flows/0_nutrient_excretions.html in Nutrient intakes by age and sex -> Tables
+
+population_communes <- population_communes %>%
+  mutate(
+    
+    #  Nitrogen
+    
+    # MEN
+    N_inca_men_0_1 = 0.88*ageq_rec01s1rpop2018/5, #0 to 4 years, 1/5
+    N_inca_men_1_3 = 2.58*ageq_rec01s1rpop2018*4/5, #0 to 4 years, 4/5
+    N_inca_men_4_6 = 3.33*ageq_rec02s1rpop2018*2/5, #5 to 9 years, 2/5
+    N_inca_men_7_10 = 4.16*ageq_rec02s1rpop2018*3/5, #5 to 9 years, 3/5
+    N_inca_men_11_14 = 4.67*ageq_rec03s1rpop2018, #10 to 14 years
+    N_inca_men_15_17 = 5.18*ageq_rec04s1rpop2018, #15 to 19 years
+    N_inca_men_18_44 = 5.48*(ageq_rec05s1rpop2018 + ageq_rec06s1rpop2018 + ageq_rec07s1rpop2018 + ageq_rec08s1rpop2018 + ageq_rec09s1rpop2018), #20 to 44 years, by 5-year categories
+    N_inca_men_45_64 = 5.62*(ageq_rec10s1rpop2018 + ageq_rec11s1rpop2018 + ageq_rec12s1rpop2018 + ageq_rec13s1rpop2018), #45 to 64 years, by 5-year categories
+    N_inca_men_65_79 = 5.29*(ageq_rec14s1rpop2018 + ageq_rec15s1rpop2018 + ageq_rec16s1rpop2018 + ageq_rec17s1rpop2018 + ageq_rec18s1rpop2018 + ageq_rec19s1rpop2018 + ageq_rec20s1rpop2018),#45 to >95 years, by 5-year categories
+    
+    # WOMEN, nitrogen
+    N_inca_women_0_1 = 0.949*ageq_rec01s2rpop2018/5, #0 to 4 years, 1/5
+    N_inca_women_1_3 = 2.51*ageq_rec01s2rpop2018*4/5, #0 to 4 years, 4/5
+    N_inca_women_4_6 = 3.18*ageq_rec02s2rpop2018*2/5, #5 to 9 years, 2/5
+    N_inca_women_7_10 = 3.76*ageq_rec02s2rpop2018*3/5, #5 to 9 years, 3/5
+    N_inca_women_11_14 = 4.09*ageq_rec03s2rpop2018, #10 to 14 years
+    N_inca_women_15_17 = 3.83*ageq_rec04s2rpop2018, #15 to 19 years
+    N_inca_women_18_44 = 4.12*(ageq_rec05s2rpop2018 + ageq_rec06s2rpop2018 + ageq_rec07s2rpop2018 + ageq_rec08s2rpop2018 + ageq_rec09s2rpop2018), #20 to 44 years, by 5-year categories
+    N_inca_women_45_64 = 4.34*(ageq_rec10s2rpop2018 + ageq_rec11s2rpop2018 + ageq_rec12s2rpop2018 + ageq_rec13s2rpop2018), #45 to 64 years, by 5-year categories
+    N_inca_women_65_79 = 4.05*(ageq_rec14s2rpop2018 + ageq_rec15s2rpop2018 + ageq_rec16s2rpop2018 + ageq_rec17s2rpop2018 + ageq_rec18s2rpop2018 + ageq_rec19s2rpop2018 + ageq_rec20s2rpop2018),#45 to >95 years, by 5-year categories
+    
+    
+    
+    #  Phosphorus
+    
+    # MEN
+    P_inca_men_0_1 = 0.134*ageq_rec01s1rpop2018/5, #0 to 4 years, 1/5
+    P_inca_men_1_3 = 0.303*ageq_rec01s1rpop2018*4/5, #0 to 4 years, 4/5
+    P_inca_men_4_6 = 0.361*ageq_rec02s1rpop2018*2/5, #5 to 9 years, 2/5
+    P_inca_men_7_10 = 0.434*ageq_rec02s1rpop2018*3/5, #5 to 9 years, 3/5
+    P_inca_men_11_14 = 0.467*ageq_rec03s1rpop2018, #10 to 14 years
+    P_inca_men_15_17 = 0.5*ageq_rec04s1rpop2018, #15 to 19 years
+    P_inca_men_18_44 = 0.515*(ageq_rec05s1rpop2018 + ageq_rec06s1rpop2018 + ageq_rec07s1rpop2018 + ageq_rec08s1rpop2018 + ageq_rec09s1rpop2018), #20 to 44 years, by 5-year categories
+    P_inca_men_45_64 = 0.518*(ageq_rec10s1rpop2018 + ageq_rec11s1rpop2018 + ageq_rec12s1rpop2018 + ageq_rec13s1rpop2018), #45 to 64 years, by 5-year categories
+    P_inca_men_65_79 = 0.482*(ageq_rec14s1rpop2018 + ageq_rec15s1rpop2018 + ageq_rec16s1rpop2018 + ageq_rec17s1rpop2018 + ageq_rec18s1rpop2018 + ageq_rec19s1rpop2018 + ageq_rec20s1rpop2018),#45 to >95 years, by 5-year categories
+    
+    # WOMEN, nitrogen
+    P_inca_women_0_1 = 0.142*ageq_rec01s2rpop2018/5, #0 to 4 years, 1/5
+    P_inca_women_1_3 = 0.296*ageq_rec01s2rpop2018*4/5, #0 to 4 years, 4/5
+    P_inca_women_4_6 = 0.346*ageq_rec02s2rpop2018*2/5, #5 to 9 years, 2/5
+    P_inca_women_7_10 = 0.387*ageq_rec02s2rpop2018*3/5, #5 to 9 years, 3/5
+    P_inca_women_11_14 = 0.412*ageq_rec03s2rpop2018, #10 to 14 years
+    P_inca_women_15_17 = 0.383*ageq_rec04s2rpop2018, #15 to 19 years
+    P_inca_women_18_44 = 0.405*(ageq_rec05s2rpop2018 + ageq_rec06s2rpop2018 + ageq_rec07s2rpop2018 + ageq_rec08s2rpop2018 + ageq_rec09s2rpop2018), #20 to 44 years, by 5-year categories
+    P_inca_women_45_64 = 0.409*(ageq_rec10s2rpop2018 + ageq_rec11s2rpop2018 + ageq_rec12s2rpop2018 + ageq_rec13s2rpop2018), #45 to 64 years, by 5-year categories
+    P_inca_women_65_79 = 0.376*(ageq_rec14s2rpop2018 + ageq_rec15s2rpop2018 + ageq_rec16s2rpop2018 + ageq_rec17s2rpop2018 + ageq_rec18s2rpop2018 + ageq_rec19s2rpop2018 + ageq_rec20s2rpop2018),#45 to >95 years, by 5-year categories
+    
+    
+    
+    #  Potassium
+    
+    # MEN
+    K_inca_men_0_1 = 0.286*ageq_rec01s1rpop2018/5, #0 to 4 years, 1/5
+    K_inca_men_1_3 = 0.675*ageq_rec01s1rpop2018*4/5, #0 to 4 years, 4/5
+    K_inca_men_4_6 = 0.803*ageq_rec02s1rpop2018*2/5, #5 to 9 years, 2/5
+    K_inca_men_7_10 = 0.964*ageq_rec02s1rpop2018*3/5, #5 to 9 years, 3/5
+    K_inca_men_11_14 = 1.03*ageq_rec03s1rpop2018, #10 to 14 years
+    K_inca_men_15_17 = 1.07*ageq_rec04s1rpop2018, #15 to 19 years
+    K_inca_men_18_44 = 1.21*(ageq_rec05s1rpop2018 + ageq_rec06s1rpop2018 + ageq_rec07s1rpop2018 + ageq_rec08s1rpop2018 + ageq_rec09s1rpop2018), #20 to 44 years, by 5-year categories
+    K_inca_men_45_64 = 1.34*(ageq_rec10s1rpop2018 + ageq_rec11s1rpop2018 + ageq_rec12s1rpop2018 + ageq_rec13s1rpop2018), #45 to 64 years, by 5-year categories
+    K_inca_men_65_79 = 1.27*(ageq_rec14s1rpop2018 + ageq_rec15s1rpop2018 + ageq_rec16s1rpop2018 + ageq_rec17s1rpop2018 + ageq_rec18s1rpop2018 + ageq_rec19s1rpop2018 + ageq_rec20s1rpop2018),#45 to >95 years, by 5-year categories
+    
+    # WOMEN, nitrogen
+    K_inca_women_0_1 = 0.315*ageq_rec01s2rpop2018/5, #0 to 4 years, 1/5
+    K_inca_women_1_3 = 0.628*ageq_rec01s2rpop2018*4/5, #0 to 4 years, 4/5
+    K_inca_women_4_6 = 0.785*ageq_rec02s2rpop2018*2/5, #5 to 9 years, 2/5
+    K_inca_women_7_10 = 0.85*ageq_rec02s2rpop2018*3/5, #5 to 9 years, 3/5
+    K_inca_women_11_14 = 0.92*ageq_rec03s2rpop2018, #10 to 14 years
+    K_inca_women_15_17 = 0.876*ageq_rec04s2rpop2018, #15 to 19 years
+    K_inca_women_18_44 = 0.986*(ageq_rec05s2rpop2018 + ageq_rec06s2rpop2018 + ageq_rec07s2rpop2018 + ageq_rec08s2rpop2018 + ageq_rec09s2rpop2018), #20 to 44 years, by 5-year categories
+    K_inca_women_45_64 = 1.09*(ageq_rec10s2rpop2018 + ageq_rec11s2rpop2018 + ageq_rec12s2rpop2018 + ageq_rec13s2rpop2018), #45 to 64 years, by 5-year categories
+    K_inca_women_65_79 = 1.04*(ageq_rec14s2rpop2018 + ageq_rec15s2rpop2018 + ageq_rec16s2rpop2018 + ageq_rec17s2rpop2018 + ageq_rec18s2rpop2018 + ageq_rec19s2rpop2018 + ageq_rec20s2rpop2018),#45 to >95 years, by 5-year categories
+    
+    
+    # Add all ages categories
+    
+    #      population
+    population =
+      #men
+      ageq_rec01s1rpop2018 + ageq_rec02s1rpop2018 + ageq_rec03s1rpop2018 + ageq_rec04s1rpop2018 + ageq_rec05s1rpop2018 + ageq_rec06s1rpop2018 + ageq_rec07s1rpop2018 + ageq_rec08s1rpop2018 + ageq_rec09s1rpop2018 + ageq_rec10s1rpop2018 + ageq_rec11s1rpop2018 + ageq_rec12s1rpop2018 + ageq_rec13s1rpop2018 + ageq_rec14s1rpop2018 + ageq_rec15s1rpop2018 + ageq_rec16s1rpop2018 + ageq_rec17s1rpop2018 + ageq_rec18s1rpop2018 + ageq_rec19s1rpop2018 + ageq_rec20s1rpop2018 +
+      #women
+      ageq_rec01s2rpop2018 + ageq_rec02s2rpop2018 + ageq_rec03s2rpop2018 + ageq_rec04s2rpop2018 + ageq_rec05s2rpop2018 + ageq_rec06s2rpop2018 + ageq_rec07s2rpop2018 + ageq_rec08s2rpop2018 + ageq_rec09s2rpop2018 + ageq_rec10s2rpop2018 + ageq_rec11s2rpop2018 + ageq_rec12s2rpop2018 + ageq_rec13s2rpop2018 + ageq_rec14s2rpop2018 + ageq_rec15s2rpop2018 + ageq_rec16s2rpop2018 + ageq_rec17s2rpop2018 + ageq_rec18s2rpop2018 + ageq_rec19s2rpop2018 + ageq_rec20s2rpop2018,
+    
+    #       nitrogen
+    kgN_excretions = 
+      #men
+      N_inca_men_0_1 + N_inca_men_1_3 + N_inca_men_4_6 + N_inca_men_7_10 + N_inca_men_11_14 + N_inca_men_15_17 + N_inca_men_18_44 + N_inca_men_45_64 + N_inca_men_65_79 +
+      #women
+      N_inca_women_0_1 + N_inca_women_1_3 + N_inca_women_4_6 + N_inca_women_7_10 + N_inca_women_11_14 + N_inca_women_15_17 + N_inca_women_18_44 + N_inca_women_45_64 + N_inca_women_65_79,
+    
+    #       phosphorus
+    kgP_excretions = 
+      #men
+      P_inca_men_0_1 + P_inca_men_1_3 + P_inca_men_4_6 + P_inca_men_7_10 + P_inca_men_11_14 + P_inca_men_15_17 + P_inca_men_18_44 + P_inca_men_45_64 + P_inca_men_65_79 +
+      #women
+      P_inca_women_0_1 + P_inca_women_1_3 + P_inca_women_4_6 + P_inca_women_7_10 + P_inca_women_11_14 + P_inca_women_15_17 + P_inca_women_18_44 + P_inca_women_45_64 + P_inca_women_65_79,
+    
+    #      potassium
+    kgK_excretions = 
+      #men
+      K_inca_men_0_1 + K_inca_men_1_3 + K_inca_men_4_6 + K_inca_men_7_10 + K_inca_men_11_14 + K_inca_men_15_17 + K_inca_men_18_44 + K_inca_men_45_64 + K_inca_men_65_79 +
+      #women
+      K_inca_women_0_1 + K_inca_women_1_3 + K_inca_women_4_6 + K_inca_women_7_10 + K_inca_women_11_14 + K_inca_women_15_17 + K_inca_women_18_44 + K_inca_women_45_64 + K_inca_women_65_79,
+    
+    
+    # and finally create code commune based on department and commune codes
+    
+    code_commune = paste0(DR, CR)
+    
+  ) %>%
+  
+  select(
+    code_region = RR, code_department = DR, code_commune, name_commune = LIBELLE, 
+    population, kgN_excretions, kgP_excretions, kgK_excretions
+  )
+```
+
+The 20 Parisian arrondissements are merged into 1 commune, and overseas territories are removed.
+
+```{r correct_paris_and_remove_overseas}
+#have to merge Paris arrondissements in 1 unique commune
+#first we merge the arrondissements in one temporary file. 75056 is the code for Paris in the map file
+temp <- population_communes %>% filter(
+  code_commune %in% c(
+    "75101", "75102", "75103", "75104", "75105", "75106", "75107", "75108", "75109", "75110",
+    "75111", "75112", "75113", "75114", "75115", "75116", "75117", "75118", "75119", "75120")) %>%
+  mutate(code_commune = "75056", name_commune = "Paris") %>%
+  group_by(code_region, code_department, code_commune, name_commune) %>%
+  summarise(
+    population = sum(population, na.rm = T),
+    kgN_excretions = sum(kgN_excretions, na.rm = T),
+    kgP_excretions = sum(kgP_excretions, na.rm = T),
+    kgK_excretions = sum(kgK_excretions, na.rm = T)
+    )
+
+#then we remove arrondissements from the main file
+population_communes <- population_communes %>% 
+  filter(!code_commune %in% c(
+    "75101", "75102", "75103", "75104", "75105", "75106", "75107", "75108", "75109", "75110",
+    "75111", "75112", "75113", "75114", "75115", "75116", "75117", "75118", "75119", "75120"))
+
+#finally we merge the two files
+population_communes <- 
+  bind_rows(population_communes, temp)
+rm(temp)
+
+#we remove overseas territories
+population_communes <- population_communes %>% 
+  filter(!code_department %in% c(
+    "971", "972", "973", "974"))
+
+
+official_pop <- sum(population_communes$population, na.rm=T)/10^6 # 64.8 Mhab
+official_N_excr <- sum(population_communes$kgN_excretions, na.rm=T)/10^6 # 294 ktN
+official_P_excr <- sum(population_communes$kgP_excretions, na.rm=T)/10^6 # 28.2 ktP
+official_K_excr <- sum(population_communes$kgK_excretions, na.rm=T)/10^6 # 69.8 ktK
+
+N_excrec_per_cap <- official_N_excr/official_pop # 4.54 kgN/cap
+P_excrec_per_cap <- official_P_excr/official_pop # 0.44 kgP/cap
+K_excrec_per_cap <- official_K_excr/official_pop # 1.08 kgK/cap
+```
+
+I add communes spatial polygons from Géoservices Admin Express shapefile data ([link](https://geoservices.ign.fr/adminexpress){target="_blank"}) to INSEE communes data.
+
+```{r add_polygons_to_communes}
+#all communes in sf_communes are in population_communes (unpaired is empty)
+unpaired <- anti_join(sf_communes, population_communes, by="code_commune")
+
+#check communes in population_communes not present in sf_communes: 3244 communes concerned, but they all report 0 inhabitants, so no consequence
+unpaired <- anti_join(population_communes, sf_communes, by="code_commune")
+nrow(unpaired) #3244 communes
+sum(unpaired$population, na.rm=T) #0 hab
+rm(unpaired)
+
+#so we chose to perform an inner join (to not keep these communes with 0 inhabitants)
+population_communes <- inner_join(
+  population_communes, 
+  sf_communes %>% 
+    #remove columns already in population_communes
+    select(-c(name_commune, code_department, code_region)), 
+  by="code_commune"
+  ) 
+
+# uncomment to check coherence between the 2 datasets communes population
+# ggplot(population_communes) +
+#   geom_point(aes(population_sf, population)) +
+#   scale_x_log10() + scale_y_log10()
+
+# INSEE and shapefile population data are very similar
+sum(population_communes$population, na.rm=T)/10^6 #64.8 in the INSEE data by age
+sum(sf_communes$population_sf, na.rm=T)/10^6 #64.6 in the shapefile 
+
+#we only keep the official INSEE popultion data
+population_communes <- population_communes %>% select(-population_sf)
+
+
+#compute communes area based on polygon
+population_communes <- population_communes %>%
+  mutate(
+    area_m2 = st_area(geometry),
+    area_commune_ha = as.numeric(area_m2/10000),
+    area_commune_km2 = as.numeric(area_commune_ha/100)
+    ) %>%
+  select(-area_m2)
+```
+
+
+## Population at 1 km2 resolution
+
+
+Population at the 1 km2 resolution ([source](https://www.insee.fr/fr/statistiques/4176293?sommaire=4176305#consulter) of the dataset from INSEE).
+
+Once again I adapt the population data by age to convert it to nutrient excretions.
+
+```{r compute_population_excretions_pixels}
+population_1km2 <- st_read("source/population/population_density_1km/Filosofi2015_carreaux_1000m_shp/Filosofi2015_carreaux_1000m_metropole.shp")
+#CRS = RGF93 v1 / Lambert-93 (EPSG, 2154). OK
+
+#transform squares to points
+population_1km2 <- population_1km2 %>%
+  mutate(geometry = st_centroid(geometry)) 
+
+
+#compute excretions no considering ages, just mean excretion from previous study
+population_1km2_no_ages <- population_1km2 %>%
+  select(
+    population = Ind
+    ) %>%
+  mutate(
+    kgN_excretions = population*N_excrec_per_cap,
+    kgP_excretions = population*P_excrec_per_cap,
+    kgK_excretions = population*K_excrec_per_cap
+  )
+
+
+#excretion based on ages categories
+population_1km2_ages <- population_1km2 %>%
+  select(
+    Ind_0_3, Ind_4_5, Ind_6_10, Ind_11_17, Ind_18_24, Ind_25_39, Ind_40_54, Ind_55_64, Ind_65_79, Ind_80p, Ind_inc
+    ) %>%
+  mutate(
+    #N by age
+    N_inca_0_1 = 0.91*Ind_0_3/4,
+    N_inca_1_3 = 2.55*Ind_0_3*3/4,
+    N_inca_4_6 = 3.26*Ind_4_5,
+    N_inca_7_10 = 3.94*Ind_6_10,
+    N_inca_11_14 = 4.38*Ind_11_17*4/7,
+    N_inca_15_17 = 4.49*Ind_11_17*3/7,
+    N_inca_18_44 = 4.71*(Ind_18_24 + Ind_25_39),
+    N_inca_45_64 = 4.89*(Ind_40_54 + Ind_55_64),
+    N_inca_65_79 = 4.56*(Ind_65_79 + Ind_80p),
+    N_inca_unknown = Ind_inc*N_excrec_per_cap,
+    
+    #P by age
+    P_inca_0_1 = 0.137*Ind_0_3/4,
+    P_inca_1_3 = 0.3*Ind_0_3*3/4,
+    P_inca_4_6 = 0.354*Ind_4_5,
+    P_inca_7_10 = 0.409*Ind_6_10,
+    P_inca_11_14 = 0.442*Ind_11_17*4/7,
+    P_inca_15_17 = 0.438*Ind_11_17*3/7,
+    P_inca_18_44 = 0.453*(Ind_18_24 + Ind_25_39),
+    P_inca_45_64 = 0.456*(Ind_40_54 + Ind_55_64),
+    P_inca_65_79 = 0.423*(Ind_65_79 + Ind_80p),
+    P_inca_unknown = Ind_inc*P_excrec_per_cap,
+    
+    #K by age
+    K_inca_0_1 = 0.297*Ind_0_3/4,
+    K_inca_1_3 = 0.653*Ind_0_3*3/4,
+    K_inca_4_6 = 0.796*Ind_4_5,
+    K_inca_7_10 = 0.905*Ind_6_10,
+    K_inca_11_14 = 0.978*Ind_11_17*4/7,
+    K_inca_15_17 = 0.971*Ind_11_17*3/7,
+    K_inca_18_44 = 1.08*(Ind_18_24 + Ind_25_39),
+    K_inca_45_64 = 1.19*(Ind_40_54 + Ind_55_64),
+    K_inca_65_79 = 1.14*(Ind_65_79 + Ind_80p),
+    K_inca_unknown = Ind_inc*K_excrec_per_cap,
+    
+    
+    #total N, P, K and population
+    #N
+    kgN_excretions = N_inca_0_1 + N_inca_1_3 + N_inca_4_6 + N_inca_7_10 + N_inca_11_14 + N_inca_15_17 + N_inca_18_44 + N_inca_45_64 + N_inca_65_79 + N_inca_unknown ,
+    #P
+    kgP_excretions = P_inca_0_1 + P_inca_1_3 + P_inca_4_6 + P_inca_7_10 + P_inca_11_14 + P_inca_15_17 + P_inca_18_44 + P_inca_45_64 + P_inca_65_79 + P_inca_unknown ,
+    #K
+    kgK_excretions = K_inca_0_1 + K_inca_1_3 + K_inca_4_6 + K_inca_7_10 + K_inca_11_14 + K_inca_15_17 + K_inca_18_44 + K_inca_45_64 + K_inca_65_79 + K_inca_unknown ,
+    #population
+    population = Ind_0_3+ Ind_4_5 + Ind_6_10 + Ind_11_17 + Ind_18_24 + Ind_25_39 + Ind_40_54 + Ind_55_64 + Ind_65_79 + Ind_80p + Ind_inc
+    ) %>%
+  select(
+    kgN_excretions, kgP_excretions, kgK_excretions, population
+  )
+```
+
+There are small discrepancies with the commune datasets regarding the resulting excretions (see the *Comparison* tab). This is mostly because the 1 km2 dataset reports a slightly smaller population. The different age distribution in the 1 km2 compared to the communes dataset almost does not influence the result (code chunk below).
+
+```{r check_consistency}
+# detailed ages results
+sum(population_1km2_ages$population)/10^6 # 62.9 Mhab
+sum(population_1km2_ages$kgN_excretions)/10^6 # 283.5 ktN (instead of 297)
+sum(population_1km2_ages$kgP_excretions)/10^6 # 27.2 ktP (instead of 28.4)
+sum(population_1km2_ages$kgK_excretions)/10^6 # 67.6 ktK (instead of 70)
+sum(population_1km2_ages$kgN_excretions)/sum(population_1km2_ages$population) # gives mean 4.5 kgN/cap.year
+sum(population_1km2_ages$kgP_excretions)/sum(population_1km2_ages$population) # gives mean 0.43 kgP/cap.year
+sum(population_1km2_ages$kgK_excretions)/sum(population_1km2_ages$population) # gives mean 1.07 kgK/cap.year
+
+# no ages results
+sum(population_1km2_no_ages$population)/10^6  # 62.9 Mhab
+sum(population_1km2_no_ages$kgN_excretions)/10^6 #286 ktN (based on hypothesis 4.6 kgN/cap/year)
+sum(population_1km2_no_ages$kgP_excretions)/10^6 #27.4 ktP (based on hypothesis 0.44 kgN/cap/year)
+sum(population_1km2_no_ages$kgK_excretions)/10^6 #67.7 ktK (based on hypothesis 1.08 kgN/cap/year)
+
+population_1km2 <- population_1km2_ages
+rm(population_1km2_ages, population_1km2_no_ages)
+```
+
+## Comparison of the 2 datasets
+
+```{r}
+data.table::setDT(population_1km2) #data.table for fast summarizing on large data
+data.table::setDT(population_communes) 
+
+#summarize population and excretions at national scale, for communes dataset
+summary_communes <- population_communes %>%
+  select(population, kgN_excretions, kgP_excretions, kgK_excretions) %>%
+  summarise(
+    `Population\n(million habs)` = round(sum(population, na.rm=T)/10^6, 1),
+    `N excretions\n(ktN)` = round(sum(kgN_excretions, na.rm=T)/10^6, 0),
+    `P excretions\n(ktP)` = round(sum(kgP_excretions, na.rm=T)/10^6, 1),
+    `K excretions\n(ktK)` = round(sum(kgK_excretions, na.rm=T)/10^6, 1)
+    ) %>%
+  mutate(
+    source = "communes dataset"
+  )
+
+#summarize population and excretions at national scale, for 1 km2 dataset
+summary_1km2 <- population_1km2 %>%
+  select(population, kgN_excretions, kgP_excretions, kgK_excretions) %>%
+  summarise(
+    `Population\n(million habs)` = round(sum(population, na.rm=T)/10^6, 1),
+    `N excretions\n(ktN)` = round(sum(kgN_excretions, na.rm=T)/10^6, 0),
+    `P excretions\n(ktP)` = round(sum(kgP_excretions, na.rm=T)/10^6, 1),
+    `K excretions\n(ktK)` = round(sum(kgK_excretions, na.rm=T)/10^6, 1)
+    ) %>%
+  mutate(
+    source = "population 1km2 dataset"
+  )
+
+#create datasets of the 2 summaries, for graph
+df_comparison <- 
+  bind_rows(summary_communes, summary_1km2) %>%
+  gather(variable, value, -source)
+temp <- df_comparison %>% spread(source, value) %>%
+  mutate(
+    percentage_difference = round((`population 1km2 dataset` - `communes dataset`)/`communes dataset`*100)
+  )
+
+#plot graph of comparisons
+ggplot(df_comparison) +
+  geom_col(
+    aes(source, value, fill=source), 
+    position = "dodge", alpha=.7, width = 0.5
+    ) +
+  geom_label(
+    aes(source, value, label=value), 
+    position = "dodge"
+    ) +
+  geom_label(
+    data = temp,
+    aes(1.5, 0, label=paste0("difference:\n", percentage_difference, "%")), 
+    vjust=0
+    ) +
+  facet_wrap(
+    vars(variable), scales="free_y"
+    ) +
+  theme(
+    axis.text.x = element_blank(),
+    legend.position = "top"
+    ) +
+  labs(
+    x="", y="", fill="",
+    title = "Difference between the 2 datasets",
+    subtitle = "due to population and age categories differences"
+    )
+
+#remove temporary files used for graph
+rm(temp, df_comparison, summary_communes, summary_1km2)
+```
+
+
+## Merge the 2 datasets information and prepare 4km2 data
+
+```{r}
+# resolution of raster pixels
+resolution_meters <- 2000
+km2_resolution <- (resolution_meters/10^3)^2
+ha_resolution <- km2_resolution*100
+```
+
+
+```{r prepare_raster_1km2}
+population_1km2 <- st_as_sf(population_1km2)
+
+#prepare raster
+population_4km2 <- f_prepare_raster(
+  population_1km2 %>% mutate(kgNorg = 0, area_ha = 100), #have to fill Norg and area variables for function f_prepare_raster
+  area_ha, kgN_excretions, kgP_excretions, kgK_excretions, kgNorg,
+  resolution_meters, sf_france
+  )
+#rm(population_1km2)
+```
+
+
+join raster data with communes description
+
+```{r add_commune_belonging_and_descriptions_to_pixels}
+population_4km2 <- st_as_sf(population_4km2, coords = c("x", "y"), crs = CRS_RGF93_Lambert93) %>%
+  #remove pixels with no population
+  filter(is.na(population)==F)
+
+#to save coordinates in 2 columns later (points geometry dropped in the following join)
+population_4km2 <- population_4km2 %>%
+  mutate(
+    y = st_coordinates(geometry)[, "Y"],
+    x = st_coordinates(geometry)[, "X"]
+  )
+
+#attribute each point of population_1km2 to a polygon commune of sf_communes
+#st_join(population_1km2, temp_anonym, join = st_within) would be conceptually more correct, but is way slower
+
+#first, dropping the points not within a commune polygon, to see the % of losses
+join_dropping_unattributed_points <- st_join(sf_communes, population_4km2, join = st_intersects)
+
+# 0.4% of pixels not attributed to a commune
+(nrow(population_4km2)-nrow(join_dropping_unattributed_points))/nrow(population_4km2)*100 
+
+#correspond to 1% of the original population in the population_4km2 file
+(sum(population_4km2$population, na.rm=T)-sum(join_dropping_unattributed_points$population, na.rm=T))/sum(population_4km2$population, na.rm=T)*100
+
+#now real join, keeping the pixels with unattributed communes
+population_4km2 <- st_join(population_4km2, sf_communes, join = st_intersects)
+rm(join_dropping_unattributed_points)
+
+#add old regions with spatial join
+population_4km2 <- st_join(population_4km2, sf_old_regions %>% select(code_old_region = code_insee), join = st_intersects)
+
+#remove data communes present in sf not attributed to pixels (based on in existent lat and long)
+population_4km2 <- population_4km2 %>% filter(is.na(x)==F & is.na(y)==F)
+
+#the join removed pixels points and added communes polygons: recompute points and remove polygons
+population_4km2 <- population_4km2 %>% st_drop_geometry()
+# population_4km2 <- st_as_sf(population_4km2, coords = c("lon_RGF93_LAMB_93", "lat_RGF93_LAMB_93"), crs = CRS_RGF93_Lambert93) 
+# population_4km2 <- population_4km2 %>%
+#   mutate(
+#     lat_RGF93_LAMB_93 = st_coordinates(geometry)[, "Y"],
+#     lon_RGF93_LAMB_93 := st_coordinates(geometry)[, "X"]
+#   )
+
+#add region and old region names
+temp <- read_csv("source/regions_data/regions_keys.csv", col_types = cols("c", "c", "c", "c"))
+#add region name based on code_region 
+population_4km2 <- population_4km2 %>% left_join(temp %>% select(code_region, name_region) %>% distinct(), by="code_region")
+#add old region name based on code_old_region
+population_4km2 <- population_4km2 %>% left_join(temp %>% select(code_old_region, name_old_region), by="code_old_region")
+rm(temp)
+```
+
+```{r prepare_raster_4km2_density}
+#transform for variable per our resolution (here 4 km2) to variable per km2
+population_4km2 <- population_4km2 %>%
+  mutate(
+  #population
+  pop_per_km2 = population/km2_resolution,
+  pop_commune_per_ha = pop_per_km2/100,
+    ) %>%
+  filter(
+    is.na(pop_per_km2)==F
+    )
+```
+
+```{r prepare_sf_communes}
+population_communes <- population_communes %>%
+  mutate(
+    #population
+    pop_commune_per_km2 = population/area_commune_km2,
+    pop_commune_per_ha = pop_commune_per_km2/100,
+    
+    #tN/km2 and kgN/ha
+    kgN_excretions_per_ha = kgN_excretions/area_commune_ha,
+    tN_excretions_per_km2 = kgN_excretions_per_ha/1000*100,
+    
+    #tP/km2 and kgP/ha
+    kgP_excretions_per_ha = kgP_excretions/area_commune_ha,
+    tP_excretions_per_km2 = kgP_excretions_per_ha/1000*100,
+    
+    #tK/km2 and kgK/ha
+    kgK_excretions_per_ha = kgK_excretions/area_commune_ha,
+    tK_excretions_per_km2 = kgK_excretions_per_ha/1000*100
+    
+    ) %>%
+  filter(
+    is.na(pop_commune_per_km2)==F
+    )
+population_communes <- st_as_sf(population_communes)
+```
+
+save data
+
+```{r}
+# COMMUNES DATASET
+
+#save a file without commune polygon but just its x and y coordinates, to simplify
+temp <- population_communes
+temp$geometry <- st_centroid(temp$geometry)
+
+#add old regions with a spatial join on communes coordinates
+temp <- st_join(temp, sf_old_regions %>% select(code_old_region = code_insee), join = st_intersects)
+
+#add region and old region names
+temp_keys_regions <- read_csv("source/regions_data/regions_keys.csv", col_types = cols("c", "c", "c", "c"))
+#add region name based on code_region 
+temp <- temp %>% left_join(temp_keys_regions %>% select(code_region, name_region) %>% distinct(), by="code_region")
+#add old region name based on code_old_region
+temp <- temp %>% left_join(temp_keys_regions %>% select(code_old_region, name_old_region), by="code_old_region")
+rm(temp_keys_regions)
+
+#explicit name of projection and coordinate system for x and y
+temp <- temp %>%
+  mutate(
+    lat_RGF93_LAMB_93_excr = st_coordinates(geometry)[, "Y"],
+    lon_RGF93_LAMB_93_excr := st_coordinates(geometry)[, "X"]
+  ) %>%
+  #explicitly say it concerns excretions
+  rename(
+    code_region_excr = code_region,
+    name_region_excr = name_region,
+    code_department_excr = code_department,
+    code_commune_excr = code_commune,
+    name_commune_excr = name_commune,
+    code_old_region_excr = code_old_region,
+    name_old_region_excr = name_old_region,
+  ) %>%
+  st_drop_geometry()
+
+f_save_csv_files(
+  temp, "output/excretions/",
+  "excretions_by_communes.csv"
+)
+
+
+# RASTER 4 KM2 DATASET
+
+temp <- population_4km2 %>%
+  rename(
+    lat_RGF93_LAMB_93_excr = y,
+    lon_RGF93_LAMB_93_excr = x,
+    cell_ID = ID
+    ) %>%
+  #explicitly say it concerns excretions
+  rename(
+    code_region_excr = code_region,
+    name_region_excr = name_region,
+    code_department_excr = code_department,
+    code_commune_excr = code_commune,
+    name_commune_excr = name_commune,
+    code_old_region_excr = code_old_region,
+    name_old_region_excr = name_old_region,
+  )
+
+f_save_csv_files(
+  temp, "output/excretions/",
+  "excretions_by_4km2.csv"
+)
+f_save_parquet_files(
+  temp, "output/excretions/",
+  "excretions_by_4km2.parquet"
+)
+#sum(temp$population)
+
+ #remove temporary old region file
+rm(sf_old_regions)
+```
+
+simplify communes polygons for faster plot
+
+```{r}
+population_communes <- st_simplify(population_communes, 100, preserveTopology = T)
+```
+
+
+:::
+
+# Maps
+
+
+```{r functions_to_plot_data}
+#functions_to_prepare_data_for_maps
+
+#function to see distribution 
+f_graph_distribution <- function(dataset, variable, nutrient){
+  ggplot(dataset) + 
+    geom_histogram(
+      aes({{ variable }}),
+      alpha=.7, bins = 100
+      ) +
+    labs(
+      x = paste0("mean ", nutrient," per ha\non the ", km2_resolution, " km2 (", ha_resolution, " ha) pixels")
+      )
+}
+
+#function for map from communes
+f_graph_communes <- function(title, legend){
+  ggplot(population_communes %>% filter(is.na(category)==F)) +
+    geom_sf(data = sf_france, fill=NA) +
+    geom_sf(
+      aes(fill=category), lwd = 0
+      ) +
+    labs(
+      title = title,
+      fill=legend,
+      caption="\n\n"
+      ) +
+    coord_sf(datum = NA) #remove x and y axis notations
+}
+```
+
+
+
+::: panel-tabset
+## population
+
+```{r prepare_graph_population}
+breaks <- c(0, 10, 100, 1000, 10000, 100000000)
+labels <- c("0 - 10", "10 - 100", "100 - 1 000", "1 000 - 10 000", "> 10 000")
+
+population_4km2 <- f_categorize_densities(
+  population_4km2, "pop_per_km2", breaks, labels)
+population_communes <- f_categorize_densities(
+  population_communes, "pop_commune_per_km2", breaks, labels)
+```
+
+::: panel-tabset
+### 4 km2 data
+
+```{r graph_population_1km2}
+f_grap_map_raster(
+  population_4km2, 
+  category, "population per km2", resolution_meters,
+  sf_france, "#440154"
+  ) + 
+  labs(
+    title = "Population density"
+    )
+```
+
+### communes data
+
+```{r graph_population_communes}
+f_graph_communes("Population density", "population per km2")
+```
+
+### distribution
+
+```{r graph_population_distribution}
+f_graph_distribution(population_4km2, pop_per_km2, "population") +
+  scale_x_log10(labels = scales::label_number(drop0trailing = TRUE)) +
+  labs(x="mean population density (hab/km2)\non the 4 km2 pixel")
+```
+
+:::
+
+## N excreted
+
+```{r prepare_graph_N}
+breaks <- c(0, 1, 3, 5, 10, 100000)
+labels <- c("< 1", "1 - 3", "3 - 5", "5 - 10", "> 10")
+
+population_4km2 <- f_categorize_densities(
+  population_4km2, "tNmin_per_km2", breaks, labels)
+population_communes <- f_categorize_densities(
+  population_communes, "tN_excretions_per_km2", breaks, labels)
+```
+
+::: panel-tabset
+### 4 km2 data
+
+```{r graph_N_1km2}
+f_grap_map_raster(
+  population_4km2, 
+  category, "tons of\nN excreted\nper km2", resolution_meters,
+  sf_france, "#440154"
+  ) + 
+  labs(
+    title = "N excretions in France(~ 280 ktN)"
+    )
+
+#plot at commune scale
+#f_graph_communes("N excretions in France(~ 280 ktN)", "mean\nkgN excreted\nper ha")
+```
+
+### distribution
+
+attention ce n'est pas par ha mais par km2 !!
+
+```{r graph_N_distribution}
+f_graph_distribution(population_4km2, tNmin_per_km2, "tons of N excreted") +
+  scale_x_log10(labels = scales::label_number(drop0trailing = TRUE)) 
+```
+
+:::
+
+## P excreted
+
+```{r prepare_graph_P}
+breaks <- c(0, .1, .3, .5, 1, 100000)
+labels <- c("< 0.1", "0.1 - 0.3", "0.3 - 0.5", ".5 - 1", "> 1")
+
+population_4km2 <- f_categorize_densities(
+  population_4km2, "tPmin_per_km2", breaks, labels)
+
+population_communes <- f_categorize_densities(
+  population_communes, "tP_excretions_per_km2", breaks, labels)
+```
+
+::: panel-tabset
+### 4 km2 data
+
+```{r graph_P_1km2}
+f_grap_map_raster(
+  population_4km2, 
+  category, "tons of\nP excreted\nper km2", resolution_meters,
+  sf_france, "#440154"
+  ) + 
+  labs(
+    title = "P excretions in France (~ 28 ktP)"
+    )
+
+# plot at commune scale
+#f_graph_communes("P excretions in France(~ 28 ktP)", "mean\nkgP excreted\nper ha")
+```
+
+### distribution
+
+attention ce n'est pas par ha mais par km2 !!
+
+```{r graph_P_distribution}
+f_graph_distribution(population_4km2, tPmin_per_km2, "tons of P excreted") +
+  scale_x_log10(labels = scales::label_number(drop0trailing = TRUE)) 
+```
+
+:::
+
+## K excreted
+
+```{r prepare_graph_K}
+breaks <- c(0, .2, .6, 1, 2, 100000)
+labels <- c("< 0.2", "0.2 - 0.6", "0.6 - 1", "1 - 2", "> 2")
+
+population_4km2 <- f_categorize_densities(
+  population_4km2, "tKmin_per_km2", breaks, labels)
+population_communes <- f_categorize_densities(
+  population_communes, "tK_excretions_per_km2", breaks, labels)
+```
+
+::: panel-tabset
+### 4 km2 data
+
+```{r graph_K_1km2}
+f_grap_map_raster(
+  population_4km2, 
+  category, "tons of\nK excreted\nper km2", resolution_meters,
+  sf_france, "#440154"
+  ) + 
+  labs(
+    title = "K excretions in France (~ 70 ktK)"
+    )
+
+#plot at commune scale
+#f_graph_communes("K excretions in France(~ 70 ktK)", "mean\nkgK excreted\nper ha")
+```
+
+### distribution
+
+```{r graph_K_distribution}
+f_graph_distribution(population_4km2, tKmin_per_km2, "tons of K excreted") +
+  scale_x_log10(labels = scales::label_number(drop0trailing = TRUE)) 
+```
+
+:::
+
+## Resolution comparison
+
+```{r}
+ggplot(population_communes) + 
+  geom_histogram(
+    aes(area_commune_km2)
+    ) +
+  geom_vline(
+    xintercept = 4, linetype = "dashed"
+    ) +
+  scale_x_log10(
+    labels = scales::label_number(drop0trailing = TRUE), 
+    limits = c(0.5, 300)
+    ) +
+  annotate(
+    geom = "text", x = 4, y = 2500, hjust = 1, fontface = "italic",
+    label = "raster's pixel \narea (4 km2) "
+    ) +
+  labs(
+    title = "Distribution of communes area",
+    x = "commune area (km2)", y = "number of communes"
+    )
+```
+
+
+:::
+
+
+
+
+
+```{r}
+rm(list = ls())
+```
+
+
+
+
+

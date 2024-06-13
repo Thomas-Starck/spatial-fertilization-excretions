@@ -1,0 +1,158 @@
+---
+title: "Untitled"
+---
+
+```{r}
+# Load the function file
+source("functions.R")
+#included:
+#-function to save csv f_save_csv_files
+#-set the default scale_color and scale_fill to viridis theme
+#-loads the core tidyverse package
+library(arrow)
+library(data.table)
+
+select_columns <- c(
+  "Year", 
+  "our_label",
+  "N mineral fertilization (kgN)",
+  "P mineral fertilization (kgP)",
+  "K mineral fertilization (kgK)",
+  "N organic fertilization (kgN)",
+  "code_old_region_parcel", "name_old_region_parcel",
+  "code_region_parcel", "name_region_parcel",
+  "parcel_area_ha",
+  "lat_RGF93_LAMB_93_parcel", "lon_RGF93_LAMB_93_parcel",
+  "CODE_CULTURE"
+  )
+```
+
+
+This document is not rendered in the file, it only gathers the regional full results into a France parquet file, which can be quite long.
+
+Load half of the regions
+
+```{r}
+# names of the files to be selected
+file_names_1 <- c(
+  "R11_Ile_de_France_2015_2020.parquet",
+  "R24_Centre_Val_de_Loire_2015_2020.parquet",
+  "R27_Bourgogne_Franche_Comte_2015_2020.parquet",
+  "R28_Normandie_2015_2020.parquet",
+  "R32_Hauts_de_France_2015_2020.parquet",
+  "R44_Grand_Est_2015_2020.parquet"
+)
+file_names_2 <- c(
+  "R52_Pays_de_la_Loire_2015_2020.parquet",
+  "R53_Bretagne_2015_2020.parquet",
+  "R75_Nouvelle_Aquitaine_2015_2020.parquet",
+  "R76_Occitanie_2015_2020.parquet",
+  "R84_Auvergne_Rhone_Alpes_2015_2020.parquet",
+  "R93_Provence_Alpes_Cote_Azur_2015_2020.parquet",
+  "R94_Corse_2015_2020.parquet"
+)
+
+# creating full path from path and file names
+full_paths <- file.path("output/full_data/regional", file_names_1)
+
+# load the files and gather them
+france <- rbindlist(lapply(full_paths, function(file_path) {
+  as.data.table(read_parquet(file_path, col_select = all_of(select_columns)))
+}))
+
+# creating full path from path and file names
+full_paths <- file.path("output/full_data/regional", file_names_2)
+
+france_2 <- rbindlist(lapply(full_paths, function(file_path) {
+  as.data.table(read_parquet(file_path, col_select = all_of(select_columns)))
+}))
+```
+
+Gather and save the full france data
+
+```{r}
+#gather the 2 halves
+france <- rbindlist(list(france, france_2))
+rm(france_2) #remove second half to save memory
+
+
+
+
+#save 1 national file for each year from 2015 to 2020
+for (i in 2015:2020) {
+  temp <- france[Year == i]
+  
+  f_save_parquet_files(
+    temp,
+    "output/full_data/",
+    paste0("France_", i, ".parquet")
+  )
+}
+rm(temp)
+```
+
+
+```{r save°fertilization_values}
+#to save all CODE_CULTURE x name_old_region_parcel combination concerning N, P and K fertilization
+
+# function to extract fertilization per ha for each (CODE_CULTURE, name_old_region_parcel) combination
+f_ferti_values <- function(dataset, variable_ferti_tot, variable_name_ferti_per_ha){
+  
+  ferti_values <- dataset %>% 
+  
+    # compute mean fertilization per ha 
+    mutate(
+      !!variable_name_ferti_per_ha := round({{ variable_ferti_tot }}/parcel_area_ha)
+      ) %>%
+    
+    # select only columns of interest
+    group_by(CODE_CULTURE, name_old_region_parcel, !!sym(variable_name_ferti_per_ha)) %>% 
+    
+    # remove duplicates, count unique occurrences of combinations (CODE_CULTURE, name_old_region_parcel, fertilization per ha)
+    summarise(count = n(), .groups = 'drop')
+  
+    #remove NaN and NA fertilization values
+    ferti_values <- na.omit(ferti_values)
+    
+  # We want only 1 fertilization value by (CODE_CULTURE, name_old_region_parcel) combination
+  # the multiple values are due to the approximations in the rounding above
+  # So for each combination, we keep only the row with the most common value (highest count) 
+  ferti_values <- ferti_values %>% 
+    
+    # group by combinations (CODE_CULTURE, name_old_region_parcel)
+    group_by(
+      CODE_CULTURE, name_old_region_parcel
+      ) %>%
+    
+    #for each combination, keep only the row with the highest count
+    slice_max(order_by = count, n = 1, with_ties = FALSE) %>%
+    
+    #drop the "count" column
+    select(-count)
+  
+  return(ferti_values)
+  
+}
+
+# extract values for Nmin, Pmin, Kmin, Norg fertilization
+ferti_N_min <- f_ferti_values(france, `N mineral fertilization (kgN)`, "N mineral fertilization (kgN/ha)")
+ferti_P_min <- f_ferti_values(france, `P mineral fertilization (kgP)`, "P mineral fertilization (kgP/ha)")
+ferti_K_min <- f_ferti_values(france, `K mineral fertilization (kgK)`, "K mineral fertilization (kgK/ha)")
+ferti_N_org <- f_ferti_values(france, `N organic fertilization (kgN)`, "N organic fertilization (kgN/ha)")
+
+# combine all nutriments in 1 dataset
+ferti_values <- ferti_N_min %>% 
+  full_join(ferti_P_min, by = c("CODE_CULTURE", "name_old_region_parcel")) %>%
+  full_join(ferti_K_min, by = c("CODE_CULTURE", "name_old_region_parcel")) %>%
+  full_join(ferti_N_org, by = c("CODE_CULTURE", "name_old_region_parcel")) 
+
+# save full dataset
+f_save_csv_files(ferti_values, "output/fertilization", "fertilization_all_crops.csv")
+```
+
+
+
+```{r}
+rm(list = ls())
+```
+

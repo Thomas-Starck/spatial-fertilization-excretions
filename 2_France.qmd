@@ -1,0 +1,1065 @@
+---
+title: "France"
+---
+
+
+
+
+```{r setup, include=T, message=F, warning=F}
+knitr::opts_chunk$set(message=F, warning=F, results=F, fig.align = "center",  dev='png')
+
+# Load the function file common to all pages
+source("functions.R")
+#included:
+#-function to save csv f_save_csv_files
+#-set the default scale_color and scale_fill to viridis theme
+#-loads the core tidyverse package
+
+library(arrow) #to read and write parquet file, and set objects to arrow tables
+library(sf)
+library(cowplot)
+library(patchwork) #for multiple plots
+
+#set theme for graphs
+theme_set(
+  theme_classic() +
+  theme(
+    panel.grid.major.y = element_line(), #no vertical lines by default
+    #text = element_text(family = "Times New Roman"), #default font
+    plot.title = element_text(face="bold"), #graphs titles in bolds
+    )
+  )
+
+CRS_RGF93_Lambert93 <- 2154 # number of coordinate projection system used for France (Réseau Géodésique Français 1993 - Lambert 93)
+
+# molar mass K : 39, O : 16
+K2O_K_conversion_factor <- (2*39)/(2*39+16)
+# molar mass P : 31, O : 16
+P2O5_P_conversion_factor <- (2*31)/(2*31+5*16)
+```
+
+
+
+
+
+
+# Load and prepare data
+
+::: panel-tabset
+## our data
+
+Our data prepared from all the regions in *prepare fertilizatio*
+
+```{r}
+
+
+
+# France_full_data <- bind_rows(
+#   read_parquet("output/full_data/France_2015.parquet"),
+#   read_parquet("output/full_data/France_2016.parquet"),
+#   read_parquet("output/full_data/France_2017.parquet"),
+#   read_parquet("output/full_data/France_2018.parquet"),
+#   read_parquet("output/full_data/France_2019.parquet"),
+#   read_parquet("output/full_data/France_2020.parquet")
+# )
+
+
+
+#function to synthesize the values at the regional scale
+f_regional_synthesis <- function(dataset, grouping_var) {
+  
+  # Synthesize regional results
+  dataset <- dataset %>%
+    group_by(!!! syms(grouping_var)) %>%
+    summarise(
+      `area (Mha)` = sum(parcel_area_ha, na.rm = TRUE) / 10^6,
+      `N mineral fertilization (ktN)` = sum(`N mineral fertilization (kgN)`, na.rm = TRUE) / 10^6,
+      `P mineral fertilization (ktP)` = sum(`P mineral fertilization (kgP)`, na.rm = TRUE) / 10^6,
+      `K mineral fertilization (ktK)` = sum(`K mineral fertilization (kgK)`, na.rm = TRUE) / 10^6,
+      `N organic fertilization (ktN)` = sum(`N organic fertilization (kgN)`, na.rm = TRUE) / 10^6
+    ) %>%
+    collect()
+  
+  return(dataset)
+}
+
+
+# read full data 2015 year for France parcels
+temp <- read_parquet("output/full_data/France_2015.parquet")
+
+# initiate France syntheses files with 2015 year
+synthesis_france <- f_regional_synthesis(temp, c("Year")) # national scale
+synthesis_regional <- f_regional_synthesis(temp, c("Year", "code_region_parcel", "name_region_parcel")) # regional scale
+synthesis_regional_old <- f_regional_synthesis(temp, c("Year", "code_old_region_parcel", "name_old_region_parcel")) # old regions scale
+
+# add years 2016 to 2020 to initial 2015 summarized data
+for (i in 2016:2020) {
+  # read full data for year i
+  data_year_i <- read_parquet(paste0("output/full_data/France_", as.character(i), ".parquet"))
+  
+  # synthesis national scale
+  data_year_i_synthesized <- f_regional_synthesis(data_year_i, c("Year"))
+  synthesis_france <- bind_rows(synthesis_france, data_year_i_synthesized)
+  
+  # synthesis national scale
+  data_year_i_synthesized <- f_regional_synthesis(data_year_i, c("Year", "code_region_parcel", "name_region_parcel"))
+  synthesis_regional <- bind_rows(synthesis_regional, data_year_i_synthesized)
+  
+  # synthesis national scale
+  data_year_i_synthesized <- f_regional_synthesis(data_year_i, c("Year", "code_old_region_parcel", "name_old_region_parcel"))
+  synthesis_regional_old <- bind_rows(synthesis_regional_old, data_year_i_synthesized)
+}
+
+rm(temp, data_year_i, data_year_i_synthesized)
+```
+
+## FAO and UNIFA data
+
+Used to compare our results to official values.
+
+Load FAO values (comes from processed FAO data, see the output of this other [project](https://thomas-starck.github.io/potential-human-excretions-fertilization/potential.html)).
+
+```{r load_FAO}
+FAO <- read_csv("source/FAO/fao_manure_fertilizers_balance_food_supply_countries.csv")
+FAO <- FAO %>% 
+  filter(
+    Year<2021 & Year>2014,
+    country=="France"
+  )
+```
+
+UNIFA values found on their [website](https://www.unifa.fr/statistiques-du-secteur/les-statistiques-de-campagne-retrouvez-lhistorique-des-campagnes-de){target="_blank"}, for [2017-2018](https://www.unifa.fr/sites/default/files/2023-03/Livraisons-des-engrais-en-France-metropolitaine_2017-2018_Regions.pdf){target="_blank"}, [2018-2019](https://www.unifa.fr/sites/default/files/2023-03/Livraisons-des-engrais-en-France-metropolitaine_2018-2019_Regions.pdf){target="_blank"}, [2019-2020](https://www.unifa.fr/sites/default/files/2023-03/livraisons-des-engrais-en-france-metropolitaine_2019-2020-Regions.pdf){target="_blank"}, [2020-2021](https://www.unifa.fr/sites/default/files/2024-03/brochure_tableau_2020-2021-r_n.pdf){target="_blank"}
+
+```{r load_UNIFA}
+UNIFA <- read_csv("source/fertilization/fertilizers_unifa_data.csv")
+
+UNIFA <- UNIFA %>%
+  #transforms tons to ktons and P2O5 and K2O to P and K
+  mutate(
+    `N mineral fertilization (ktN)` = N/1000,
+    `P mineral fertilization (ktP)` = P2O5*P2O5_P_conversion_factor/1000,
+    `K mineral fertilization (ktK)` = K2O*K2O_K_conversion_factor/1000
+    ) %>%
+  rename(
+    name_region_parcel = name_region
+  )
+
+UNIFA_regional <- UNIFA %>%
+  group_by(Year, name_region_parcel) %>%
+  summarise(
+    `N mineral fertilization (ktN)` = sum(`N mineral fertilization (ktN)`, na.rm=T),
+    `P mineral fertilization (ktP)` = sum(`P mineral fertilization (ktP)`, na.rm=T),
+    `K mineral fertilization (ktK)` = sum(`K mineral fertilization (ktK)`, na.rm=T),
+    )
+
+UNIFA_national<- UNIFA %>%
+  group_by(Year) %>%
+  summarise(
+    `N mineral fertilization (ktN)` = sum(`N mineral fertilization (ktN)`, na.rm=T),
+    `P mineral fertilization (ktP)` = sum(`P mineral fertilization (ktP)`, na.rm=T),
+    `K mineral fertilization (ktK)` = sum(`K mineral fertilization (ktK)`, na.rm=T),
+    )
+```
+
+:::
+
+# Comparison with official values
+
+Generally, we underestimate the official values by less thant 10%, except. for potassium, where the discrepancy is higher.
+
+::: panel-tabset
+## National scale {.tabset .tabset-fade .tabset-pills}
+
+```{r}
+temp <- bind_rows(
+  synthesis_france %>%
+    mutate(
+      source = "our value"
+      ),
+  FAO %>% 
+    select(
+      Year,
+      `N mineral fertilization (ktN)`,
+      `P mineral fertilization (ktP)`,
+      `K mineral fertilization (ktK)`,
+      `N organic fertilization (ktN)` = `All Animals Manure applied to soils (ktN)`
+      ) %>%
+    mutate(
+      source = "FAO"
+      ),
+  UNIFA_national %>%
+    mutate(
+      source = "UNIFA"
+      )
+)
+#order labels for graph display
+temp$source = factor(temp$source, levels = c("FAO", "UNIFA", "our value"))
+
+
+f_graph <- function(variable, breaks_large, breaks_min){
+  ggplot(temp) +
+    geom_line(
+      aes(Year, {{ variable }}, color=source),
+      linewidth=2
+      ) +
+    scale_color_manual(
+      breaks = c("our value", "FAO", "UNIFA"),
+      values=c("red", "black", "gray")
+      ) +
+    labs(
+      x="", color=""
+      ) +
+    scale_y_continuous(
+      breaks = seq(0, 2500, by = breaks_large),
+      minor_breaks = seq(0, 2500, by = breaks_min),
+      limits = c(0, NA)
+      ) + 
+    theme(
+      panel.grid.minor.y = element_line()
+    )
+}
+
+#save graph for manuscript
+gg <- f_graph(`N mineral fertilization (ktN)`, 500, 100) + labs(subtitle = "France mineral N fertilization", y="ktN") +
+  f_graph(`P mineral fertilization (ktP)`, 40, 10) + labs(subtitle = "France mineral P fertilization", y="ktP") + 
+  f_graph(`K mineral fertilization (ktK)`, 100, 20) + labs(subtitle = "France mineral K fertilization", y="ktK") +
+  f_graph(`N organic fertilization (ktN)`, 200, 50) + labs(subtitle = "France organic N fertilization", y="ktN") +
+  plot_layout(guides = 'collect')
+
+f_save_graph_pdf_png(
+  gg, "graph/france_fertilization/", "comparison_official_national_ferti",
+  350, 5, 7
+)
+```
+
+::: panel-tabset
+### Absolute {.tabset .tabset-fade}
+
+::: panel-tabset
+#### N
+
+```{r}
+f_graph(`N mineral fertilization (ktN)`, 500, 100) + labs(subtitle = "France mineral N fertilization", y="ktN")
+```
+
+#### P
+
+```{r}
+f_graph(`P mineral fertilization (ktP)`, 20, 10) + labs(subtitle = "France mineral P fertilization", y="ktP")
+```
+
+#### K
+
+```{r}
+f_graph(`K mineral fertilization (ktK)`, 100, 20) + labs(subtitle = "France mineral K fertilization", y="ktK")
+```
+
+#### N org
+
+```{r}
+f_graph(`N organic fertilization (ktN)`, 100, 50) + labs(subtitle = "France organic N fertilization", y="ktN")
+```
+
+
+:::
+
+### Relative {.tabset .tabset-fade}
+
+```{r}
+f_graph <- function(variable){
+  temp <- synthesis_france %>% select(Year, {{ variable }})
+  
+  temp$`% of FAO value` <- (temp %>% pull({{ variable }})) / FAO %>% pull({{ variable }})
+  temp$`% of UNIFA value`  <- (temp %>% pull({{ variable }})) / UNIFA_national %>% pull({{ variable }})
+  
+  temp <- temp %>%
+    gather(source, value, `% of FAO value`, `% of UNIFA value`)
+  
+  gg <- ggplot(data = temp) +
+    geom_line( 
+      aes(x = Year, y = value, color=source),
+      linewidth=2
+      ) +
+    labs(
+      x = "", y = "", color="",
+      title = "Our value as % of official values"
+      ) +
+    scale_color_manual(
+      breaks = c("% of FAO value", "% of UNIFA value"),
+      values=c("black", "gray")
+      ) +
+    scale_y_continuous(
+      labels = scales::percent_format(),
+      limits = c(0, NA),
+      breaks = seq(0, 1.2, by=0.1)
+      ) +
+    geom_hline(yintercept = 1, linetype="dashed")
+  
+  return(gg)
+}
+```
+
+::: panel-tabset
+#### N mineral
+
+Our value is ~90-100% of FAO and UNIFA values.
+
+```{r}
+f_graph(`N mineral fertilization (ktN)`)
+```
+
+#### P mineral
+
+Our value is ~90-100% of FAO and UNIFA values.
+
+```{r}
+f_graph(`P mineral fertilization (ktP)`)
+```
+
+#### K mineral
+
+Our value is ~80-100% of FAO and UNIFA values.
+
+```{r}
+f_graph(`K mineral fertilization (ktK)`)
+```
+
+#### N organic
+
+Our value is ~90-100% of FAO values.
+
+```{r}
+temp <- synthesis_france %>% select(Year, `N organic fertilization (ktN)`)
+temp$`% of FAO value` <- (temp %>% pull(`N organic fertilization (ktN)`)) / FAO %>% pull(`All Animals Manure applied to soils (ktN)`)
+temp <- temp %>%
+  gather(source, value, `% of FAO value`)
+
+ggplot(data = temp) +
+  geom_line( 
+    aes(x = Year, y = value, color=source),
+    linewidth=2
+    ) +
+  labs(
+    x = "", y = "", color="",
+    title = "Our value as % of official values"
+    ) +
+  scale_color_manual(
+    breaks = c("% of FAO value", "% of UNIFA value"),
+    values=c("black", "gray")
+    ) +
+  scale_y_continuous(
+    labels = scales::percent_format(),
+    limits = c(0, NA),
+    breaks = seq(0, 1.2, by=0.1)
+    ) +
+  geom_hline(yintercept = 1, linetype="dashed")
+```
+
+
+:::
+
+:::
+
+## Regional scale {.tabset .tabset-fade .tabset-pills}
+
+```{r}
+temp <- bind_rows(
+  synthesis_regional %>%
+    mutate(
+      source = "our value"
+      ),
+  UNIFA_regional %>%
+    mutate(
+      source = "UNIFA"
+      )
+)
+
+f_graph <- function(variable){
+  
+  ggplot(temp %>% filter(name_region_parcel != "Corse")) +
+    geom_line(
+      aes(Year, {{ variable }}, color=source),
+      linewidth=1.5
+      ) +
+    scale_color_manual(
+        breaks = c("UNIFA", "our value"),
+        values=c("gray", "red")
+        ) +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      legend.position = "top"
+      ) +
+    ylim(0, NA) +
+    labs(
+      x="", color=""
+      ) +
+    facet_wrap(
+      vars(as.factor(name_region_parcel)), 
+      scales="free_y"
+      )
+  
+}
+```
+
+::: panel-tabset
+### N mineral {.tabset .tabset-fade}
+
+```{r}
+f_graph(`N mineral fertilization (ktN)`)
+
+#save graph for manuscript
+gg <- f_graph(`N mineral fertilization (ktN)`) + labs(y="ktN", title = "regional N mineral fertilization")
+f_save_graph_pdf_png(
+  gg, 
+  "graph/france_fertilization/", "comparison_official_regional_ferti_N",
+  350, 6, 9
+)
+```
+
+### P mineral {.tabset .tabset-fade}
+
+```{r}
+f_graph(`P mineral fertilization (ktP)`)
+
+#save graph for manuscript, P and K regional fertilization
+gg <- f_graph(`P mineral fertilization (ktP)`) + labs(y="ktP", title = "regional P mineral fertilization") +
+  f_graph(`K mineral fertilization (ktK)`) + labs(y="ktK", title = "regional K mineral fertilization") +
+  plot_layout(guides = "collect", ncol = 1) & theme(legend.position = 'bottom')
+f_save_graph_pdf_png(
+  gg, 
+  "graph/france_fertilization/", "comparison_official_regional_ferti_PK",
+  350, 10, 9
+)
+```
+
+### K mineral {.tabset .tabset-fade}
+
+
+```{r}
+f_graph(`K mineral fertilization (ktK)`)
+```
+
+:::
+
+:::
+
+# Fertilization: map and distribution {.tabset .tabset-fade .tabset-pills}
+
+
+```{r prepare_background_france_map_sf_france}
+#create background France map
+
+#load map regions
+sf_regions <- sf::st_read("source/maps/all_French_admin_units/ADMIN-EXPRESS-COG_2-1__SHP__FRA_2020-11-20/ADMIN-EXPRESS-COG/1_DONNEES_LIVRAISON_2020-11-20/ADE-COG_2-1_SHP_LAMB93_FR/REGION.shp")
+#create whole francce polygon from regions polygon union
+sf_france <- st_union(sf_regions)
+rm(sf_regions)
+
+# resolution of raster pixels
+resolution_meters <- 2000
+km2_resolution <- (resolution_meters/10^3)^2
+ha_resolution <- km2_resolution*100
+```
+
+```{r prepare_raster}
+#selects columns for interest for year 2019
+France_full_data <- read_parquet("output/full_data/France_2019.parquet")
+data_map <- France_full_data %>% 
+  select(
+    parcel_area_ha, 
+    kgNmin = `N mineral fertilization (kgN)`,
+    kgPmin = `P mineral fertilization (kgP)`,
+    kgKmin = `K mineral fertilization (kgK)`,
+    kgNorg = `N organic fertilization (kgN)`,
+    lat_RGF93_LAMB_93_parcel, lon_RGF93_LAMB_93_parcel
+    ) 
+
+#sf for geographical
+data_map <- st_as_sf(data_map, coords = c("lon_RGF93_LAMB_93_parcel", "lat_RGF93_LAMB_93_parcel"), crs = CRS_RGF93_Lambert93) 
+
+#create raster
+raster_density <- f_prepare_raster(
+  data_map, 
+  parcel_area_ha, kgNmin, kgPmin, kgKmin, kgNorg,
+  resolution_meters, sf_france
+  )
+
+#compute total N fertilization mineral + organic
+raster_density <- raster_density %>%
+  mutate(
+    kgNtot = kgNmin + kgNorg,
+    tNtot_per_km2 = tNmin_per_km2 + tNorg_per_km2,
+    mean_kgNtot_per_ha = mean_kgNmin_per_ha + mean_kgNorg_per_ha
+    )
+
+f_save_csv_files(
+  raster_density %>%
+    rename(
+      lon_RGF93_LAMB_93_parcel = x,
+      lat_RGF93_LAMB_93_parcel = y
+    ),
+  "output/full_data/",
+  "France_2018_raster.csv"
+)
+```
+
+
+::: panel-tabset
+### Nitrogen
+
+::: panel-tabset
+
+#### Mineral
+
+::: panel-tabset
+
+##### Fertilization
+
+```{r}
+raster_density <- f_categorize_densities(
+  raster_density, "tNmin_per_km2", c(0, 1, 3, 5, 10, 100000), c("< 1", "1 - 3", "3 - 5", "5 - 10", ">10"))
+
+gg_Nmin <- f_grap_map_raster(
+  raster_density, 
+  category, "tons of\nmineral N\nper km2", resolution_meters,
+  sf_france, "#440154"
+  ) + 
+  labs(
+    title = "Mineral N fertilization in France (~ 2000 ktN)"
+    )
+gg_Nmin
+```
+
+#####  Fertilization only on agricultural land
+
+```{r}
+raster_density <- f_categorize_densities(
+  raster_density, "mean_kgNmin_per_ha", c(0, 30, 50, 80, 120, 100000), c("< 30", "30 - 50", "50 - 80", "80 - 120", ">120"))
+
+gg <- f_grap_map_raster(
+  raster_density, 
+  category, "mean kg of\nmineral N\nper ha of\nagricultural\nand", resolution_meters,
+  sf_france, "#440154"
+  ) + 
+  labs(
+    title = "Mean mineral N fertilization in France"
+    )
+gg
+```
+
+:::
+
+#### Organic
+
+::: panel-tabset
+
+##### Fertilization
+
+```{r}
+raster_density <- f_categorize_densities(
+  raster_density, "tNorg_per_km2", c(0, 1, 3, 5, 10, 100000), c("< 1", "1 - 3", "3 - 5", "5 - 10", ">10"))
+
+gg_Norg <- f_grap_map_raster(
+  raster_density, 
+  category, "tons of\norganic N\nper km2", resolution_meters,
+  sf_france, "#440154"
+  ) + 
+  labs(
+    title = "Organic N fertilization to cropland in France (~ 850 ktN)",
+    subtitle = "Only managed manure:\ndoes not include manure left on pasture"
+    )
+gg_Norg
+```
+
+#####  Fertilization only on agricultural land
+
+```{r}
+raster_density <- f_categorize_densities(
+  raster_density, "mean_kgNorg_per_ha", c(0, 30, 50, 80, 120, 100000), c("< 30", "30 - 50", "50 - 80", "80 - 120", ">120"))
+
+gg <- f_grap_map_raster(
+  raster_density, 
+  category, "mean kg of\norganic N\nper ha of\nagricultural\nand", resolution_meters,
+  sf_france, "#440154"
+  ) + 
+  labs(
+    title = "Mean organic N fertilization in France"
+    )
+gg
+```
+
+:::
+
+#### Total
+
+::: panel-tabset
+
+##### Fertilization
+
+```{r}
+raster_density <- f_categorize_densities(
+  raster_density, "tNtot_per_km2", c(0, 1, 3, 5, 10, 100000), c("< 1", "1 - 3", "3 - 5", "5 - 10", ">10"))
+
+gg_Ntot <- f_grap_map_raster(
+  raster_density, 
+  category, "tons of\ntotal N\nper km2", resolution_meters,
+  sf_france, "#440154"
+  ) + 
+  labs(
+    title = "Total N fertilization in France (~ 2850 ktN)"
+    )
+gg_Ntot
+```
+
+#####  Fertilization only on agricultural land
+
+```{r}
+raster_density <- f_categorize_densities(
+  raster_density, "mean_kgNtot_per_ha", c(0, 30, 50, 80, 120, 100000), c("< 30", "30 - 50", "50 - 80", "80 - 120", ">120"))
+
+gg <- f_grap_map_raster(
+  raster_density, 
+  category, "mean kg of\ntotal N\nper ha of\nagricultural\nand", resolution_meters,
+  sf_france, "#440154"
+  ) + 
+  labs(
+    title = "Mean total N fertilization in France"
+    )
+gg
+```
+
+:::
+
+:::
+
+### P min
+
+::: panel-tabset
+
+#### Fertilization
+
+```{r}
+raster_density <- f_categorize_densities(
+  raster_density, "tPmin_per_km2", c(0, .1, .3, .5, 1, 100000), c("< 0.1", "0.1 - 0.3", "0.3 - 0.5", "0.5 - 1","> 1"))
+
+gg_Pmin <- f_grap_map_raster(
+  raster_density, 
+  category, "tons of\nmineral P\nper km2", resolution_meters,
+  sf_france, "#440154"
+  ) + 
+  labs(
+    title = "Mineral P fertilization in France (~ 200 ktP)"
+    )
+gg_Pmin
+```
+
+
+####  Fertilization only on agricultural land
+
+```{r}
+raster_density <- f_categorize_densities(
+  raster_density, "mean_kgPmin_per_ha", c(0, 3, 5, 8, 12, 100000), c("< 3", "3 - 5", "5 - 8", "8 - 12", ">12"))
+
+gg <- f_grap_map_raster(
+  raster_density, 
+  category, "mean kg of\nmineral P\nper ha of\nagricultural\nand", resolution_meters,
+  sf_france, "#440154"
+  ) + 
+  labs(
+    title = "Mean mineral P fertilization in France"
+    )
+gg
+```
+
+:::
+
+### K min
+
+::: panel-tabset
+
+#### Fertilization
+
+```{r}
+raster_density <- f_categorize_densities(
+  raster_density, "tKmin_per_km2", c(0, .2, .6, 1, 2, 100000),  c("< 0.2", "0.2 - 0.6", "0.6 - 1", "1 - 2","> 2"))
+
+gg_Kmin <- f_grap_map_raster(
+  raster_density, 
+  category, "tons of\nmineral K\nper km2", resolution_meters,
+  sf_france, "#440154"
+  ) + 
+  labs(
+    title = "Mineral K fertilization in France (~ 400 ktK)"
+    )
+gg_Kmin
+```
+
+####  Fertilization only on agricultural land
+
+```{r}
+raster_density <- f_categorize_densities(
+  raster_density, "mean_kgKmin_per_ha", c(0, 7, 10, 15, 20, 100000), c("< 7", "7 - 10", "10 - 15", "15 - 20", "> 20"))
+
+gg <- f_grap_map_raster(
+  raster_density, 
+  category, "mean kg of\nmineral K\nper ha of\nagricultural\nland", resolution_meters,
+  sf_france, "#440154"
+  ) + 
+  labs(
+    title = "Mean mineral K fertilization in France"
+    )
+gg
+```
+
+
+```{r}
+#save Nmin and Norg for manuscript 
+gg <- gg_Nmin + labs(caption = "", subtitle = "mineral N", title = "", fill = "tons of N\nper km2") + 
+  gg_Norg + labs(caption = "", subtitle = "organic N", title = "", fill = "tons of N\nper km2") + 
+  plot_layout(guides = "collect", nrow=2) 
+f_save_graph_pdf_png(
+  gg, "graph/france_fertilization/", "map_Nmin_Norg_ferti",
+  1000, 10, 6
+)
+
+#save Pmin and Kmin for manuscript 
+gg <- gg_Pmin + 
+  labs(
+    caption = "", subtitle = "mineral P", title = ""
+    ) + 
+  gg_Kmin + 
+  labs(
+    caption = "", subtitle = "mineral K", title = ""
+    ) +
+  plot_layout(ncol=1) 
+f_save_graph_pdf_png(
+  gg, "graph/france_fertilization/", "map_Pmin_Kmin_ferti",
+  1000, 10, 6
+)
+```
+
+:::
+
+
+### Area
+
+```{r}
+raster_density <- f_categorize_densities(
+  raster_density, "ha_per_km2", 
+  c(0, 25, 50, 75, 1000), 
+  c("0 - 25 %", "25 - 50 %", "50 - 75 %","75 - 100 %")
+  )
+
+gg <- f_grap_map_raster(
+  raster_density, 
+  category, "% area\noccupied by\nagriculture", resolution_meters,
+  sf_france, "#440154"
+  ) + 
+  labs(
+    title = "Share of area occupied by nagriculture"
+    )
+gg
+
+#save area for manuscript 
+gg <- gg + labs(caption="", title="")
+f_save_graph_pdf_png(
+  gg, "graph/france_fertilization/", "map_area",
+  500, 6, 7
+)
+```
+
+### Resolution consistency
+
+
+
+```{r function_to_check_resolution_consistency}
+#produces distribution graphs, annotated, to check if the 10 km2 resolution used is legit
+f_graph_distribution_consistency <- function(dataset, variable, x_intercept, annotation_label, fill_color, x_lim_min, x_lim_max, y_label){
+  gg <- ggplot(dataset) + 
+    geom_histogram(
+      aes({{ variable }}, weight = {{ variable }}, fill=""),
+      alpha=.7, bins = 100,
+      ) + 
+    scale_fill_manual(
+      values = fill_color
+      ) +
+    scale_x_log10(
+      labels=scales::label_number(drop0trailing = TRUE), 
+      limits = c(x_lim_min, x_lim_max)
+      ) +
+    geom_vline(
+      xintercept = x_intercept,
+      linetype="dashed"
+      ) +
+    theme(
+      legend.position = "none"
+      ) +
+    labs(
+      y=""
+      ) +
+    annotate(
+      x=x_intercept, y=y_label, geom="text", label=annotation_label, hjust=1, vjust=0
+    )
+  
+  return(gg)
+}
+
+#plot the 2 distribution graphs
+plot_grid(
+  
+  f_graph_distribution_consistency(
+    data_map, parcel_area_ha, ha_resolution, "", "#440154",
+    0.1, 1000, 7500
+    ) +
+    labs(
+      subtitle = "parcels area distribution",
+      x="parceal area (ha)"
+      ) +
+    theme(
+      axis.text.y = element_blank()
+      ),
+  
+  f_graph_distribution_consistency(
+    raster_density, ha_per_km2*resolution_meters/1000, ha_resolution,
+    paste0("pixels area: \n", km2_resolution," km2 = ", ha_resolution, " ha "), "#5ec962",
+    10, 1000, 700000
+    ) +
+    labs(
+      x="ha of parcels per pixel\n(should not be superior to 400)",
+      subtitle = "parcels area aggregated in pixels"
+      ) +
+    theme(
+      axis.text.y = element_blank()
+      ),
+  
+  align = "hv"
+) + 
+  plot_annotation(title = "Consistency of pixels resolution")
+```
+
+
+
+:::
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Distributions by crop type {.tabset .tabset-fade .tabset-pills}
+
+<!-- ## Area  {.tabset .tabset-fade} -->
+
+<!-- probably a change in prairies permanentes / prairies temporaires definitions in 2017/2018. Change of 1 Mha, with a difference of 20 kgN/ha (40 for temporary and 20 for permanent) => change of 20 ktN, negligible compared to 1500-2000ktN. -->
+
+<!-- gray items have undefined fertilization levels (set to 0) -->
+
+<!-- Priorités d'attribution de fertilization : autres vergers, autres fourrages, autres estives et landes (=0 ?) ; define jachère to 0 ; autres céréales ? -->
+
+<!-- on 0.56 pour les vignes, vs 0.8 selon le [ministère](https://agriculture.gouv.fr/infographie-la-viticulture-francaise) (soit 70% couvert) -->
+<!-- Amp'air dit d'utiliser la BD topo -->
+
+<!-- ### Absolute -->
+
+<!-- ```{r results=T, out.width='100%'} -->
+<!-- RPG_national$Year <- as.integer(RPG_national$Year) -->
+<!-- # Area Mha -->
+<!-- gg <- ggplot(RPG_national %>% filter(our_label!="all agricultural land")) + -->
+<!--   geom_area( -->
+<!--     aes(Year, `area (Mha)`, fill = reorder(our_label, `area (Mha)`)), -->
+<!--     alpha = 0.9 -->
+<!--   ) + -->
+<!--   scale_y_continuous( -->
+<!--     breaks = seq(0, 30, by = 5), -->
+<!--     minor_breaks = seq(0, 30, by = 1), -->
+<!--   ) + -->
+<!--   #scale_fill_manual(values = color_mapping) + -->
+<!--   labs( -->
+<!--     fill = "", x = "", -->
+<!--     title = "Agricultural land by crop type" -->
+<!--   ) + -->
+<!--   geom_hline( -->
+<!--     yintercept = agricultural_land_France, linetype = "dashed" -->
+<!--   )  -->
+<!-- ggplotly(gg) -->
+<!-- ``` -->
+
+<!-- ### Percent -->
+
+<!-- ```{r results=T, out.width='100%'} -->
+<!-- # % area -->
+<!-- gg <- ggplot(RPG_national %>% filter(our_label!="all agricultural land")) + -->
+<!--   geom_area( -->
+<!--     aes(Year, `% of area`, fill = reorder(our_label, `% of area`)), -->
+<!--     alpha = 0.8 -->
+<!--   ) + -->
+<!--   scale_y_continuous( -->
+<!--     breaks = seq(0, 1, by = .1), -->
+<!--     labels = scales::percent_format() -->
+<!--   ) + -->
+<!--   #scale_fill_manual(values = color_mapping) + -->
+<!--   labs( -->
+<!--     fill = "", x = "", y="", -->
+<!--     title = "% agricultural land by crop type" -->
+<!--   ) -->
+<!-- ggplotly(gg) -->
+<!-- ``` -->
+
+<!-- ## N {.tabset .tabset-fade} -->
+
+<!-- ### Absolute -->
+
+<!-- line : FAO data -->
+
+<!-- ```{r results=T, out.width='100%'} -->
+<!-- gg <- ggplot(RPG_national %>% filter(our_label!="all agricultural land")) + -->
+<!--   geom_area( -->
+<!--     aes(Year, `N mineral fertilization (ktN)`, fill = reorder(our_label, `N mineral fertilization (ktN)`)), -->
+<!--     alpha = 0.8 -->
+<!--   ) + -->
+<!--   geom_line( -->
+<!--     data = FAO %>% filter(Year>2014),  -->
+<!--     aes(Year, N_fertilization, color="FAO") -->
+<!--     ) + -->
+<!--   scale_y_continuous( -->
+<!--     breaks = seq(0, 2500, by = 100) -->
+<!--   ) + -->
+<!--   #scale_fill_manual(values = color_mapping) + -->
+<!--   labs( -->
+<!--     fill = "", x = "", -->
+<!--     title = "N fertilization by crop type" -->
+<!--   )  -->
+<!-- ggplotly(gg) -->
+<!-- ``` -->
+
+<!-- ### Percent -->
+
+<!-- % relative to our incomplete values, not to FAO data -->
+
+<!-- ```{r results=T, out.width='100%'} -->
+<!-- # % of plots -->
+<!-- gg <- ggplot(RPG_national %>% filter(our_label!="all agricultural land")) + -->
+<!--   geom_area( -->
+<!--     aes(Year, `% N mineral fertilization`, fill = reorder(our_label, `% N mineral fertilization`)), -->
+<!--     alpha = 0.8 -->
+<!--   ) + -->
+<!--   scale_y_continuous( -->
+<!--     breaks = seq(0, 1, by = .1), -->
+<!--     labels = scales::percent_format() -->
+<!--   ) + -->
+<!--   #scale_fill_manual(values = color_mapping) + -->
+<!--   labs( -->
+<!--     fill = "", x = "", y="", -->
+<!--     title = "N fertilization by crop type" -->
+<!--   )  -->
+<!-- ggplotly(gg) -->
+<!-- ``` -->
+
+
+
+
+# end
+
+```{r}
+# 
+# test <- RPG %>%
+#   group_by(Year) %>%
+#   summarize(
+#     `nb of plots` = n()/10^6,
+#     `unreported fertilization` = sum(is.na(ferti_tot))/10^6,
+#     `reported fertilization` = sum(!is.na(ferti_tot))/10^6,
+#   ) 
+# 
+# g1 <- test %>%
+#   select(Year, `unreported fertilization`, `reported fertilization`) %>%
+#   gather(`plots with`, value, `unreported fertilization`, `reported fertilization`) %>%
+#   ggplot(aes(x = Year)) +
+#   geom_area(aes(y = value, fill = `plots with`)) +
+#   labs(
+#     fill = "",
+#     subtitle = "agricultural plots",
+#     y = "millions plots",
+#     x=""
+#     ) +
+#   theme(legend.position = "bottom")
+# 
+# test <- test %>%
+#   mutate(
+#     `reported fertilization` = (`reported fertilization` / `nb of plots`) * 100,
+#     `unreported fertilization` = (`unreported fertilization` / `nb of plots`) * 100
+#     )
+# g2 <- test %>%
+#   select(Year, `unreported fertilization`, `reported fertilization`) %>%
+#   gather(`% plots with`, value, `unreported fertilization`, `reported fertilization`) %>%
+#   ggplot(aes(x = Year)) +
+#   geom_area(aes(y = value, fill = `% plots with`)) +
+#   labs(
+#     fill = "",
+#     subtitle = "% of agricultural plots",
+#     y = "%",
+#     x=""
+#     ) +
+#   theme(legend.position = "bottom")
+# 
+# test <- RPG %>%
+#   group_by(Year) %>%
+#   summarize(
+#     `agricultural land area` = sum(parcel_area_ha),
+#     `unreported fertilization` = sum(parcel_area_ha * is.na(ferti_tot)),
+#     `reported fertilization` = sum(SURF_PARC * !is.na(ferti_tot))
+#   )
+# g3 <- test %>%
+#   select(Year, `unreported fertilization`, `reported fertilization`) %>%
+#   gather(`area with`, value, `unreported fertilization`, `reported fertilization`) %>%
+#   ggplot(aes(x = Year)) +
+#   geom_area(aes(y = value/10^6, fill = `area with`)) +
+#   labs(
+#     fill = "",
+#     subtitle = "agricultural land area", 
+#     y = "millions ha",
+#     x=""
+#     ) +
+#   geom_hline(yintercept = 29) +
+#   theme(legend.position = "bottom")
+# 
+# test <- test%>%
+#   mutate(
+#     `unreported fertilization` = (`unreported fertilization` / `agricultural land area`) * 100,
+#     `reported fertilization`  = (`reported fertilization`  / `agricultural land area`) * 100
+#     )
+# g4 <- test %>%
+#   select(Year, `unreported fertilization`, `reported fertilization`) %>%
+#   gather(`area with`, value, `unreported fertilization`, `reported fertilization`) %>%
+#   ggplot(aes(x = Year)) +
+#   geom_area(aes(y = value, fill = `area with`)) +
+#   labs(
+#     fill = "",
+#     subtitle = "% of agricultural land area", 
+#     y = "%",
+#     x=""
+#     )  +
+#   theme(legend.position = "bottom")
+# 
+# 
+# 
+# g1 + g2 + g3 + g4 + plot_layout(guides = "collect") + plot_annotation(
+#   theme = theme(legend.position = "bottom")
+# ) 
+```
+
+```{r remove_all_environment_objects}
+rm(list = ls())
+```
+
+
+

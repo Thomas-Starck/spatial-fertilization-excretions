@@ -1,0 +1,6 @@
+---
+title: "Introduction"
+---
+
+
+This site analyses the data from the Registre Parcellaire Graphique (RPG, Geographic Parcel Register).

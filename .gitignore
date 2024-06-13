@@ -1,0 +1,13 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+
+/.quarto/
+
+# ignore heavy files in source and ouptut
+source
+output
+
+# ignore all .DS_Store
+**/.DS_Store

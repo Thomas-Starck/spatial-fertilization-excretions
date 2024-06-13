@@ -1,0 +1,12 @@
+---
+title: "Bretagne"
+---
+
+```{r select_region}
+region <- "Bretagne"
+path_region <- "Bretagne"
+```
+
+```{r autodoc, child='1_regions_preparation.qmd', eval=TRUE}
+#common part of the document to all the regions, stored in the 0_regions_preparation.rmd file
+``` 
