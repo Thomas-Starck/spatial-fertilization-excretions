@@ -1,6 +1,6 @@
 # Spatialized Nutrients Fertilization and Excretions in France
 
-- Code to estimate nutrient (N, P, K) fertilization and human excretions at fine resolution scale in France.
+- Code to estimate nutrient (N, P, K) fertilization and human excretions at fine resolution scale in France. Linked to a DOI on a Zenodo repository https://doi.org/10.5281/zenodo.14605711
 
 - Supporting results presented in Chapter 6 of the thesis "Towards a circular management of nitrogen and phosphorus in human excreta: current state, global agricultural potential, and spatial constraint in France" (Starck 2024), https://hal.science/tel-04727806
 
