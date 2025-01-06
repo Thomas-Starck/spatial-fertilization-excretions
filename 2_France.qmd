@@ -51,20 +51,6 @@ P2O5_P_conversion_factor <- (2*31)/(2*31+5*16)
 Our data prepared from all the regions in *prepare fertilizatio*
 
 ```{r}
-
-
-
-# France_full_data <- bind_rows(
-#   read_parquet("output/full_data/France_2015.parquet"),
-#   read_parquet("output/full_data/France_2016.parquet"),
-#   read_parquet("output/full_data/France_2017.parquet"),
-#   read_parquet("output/full_data/France_2018.parquet"),
-#   read_parquet("output/full_data/France_2019.parquet"),
-#   read_parquet("output/full_data/France_2020.parquet")
-# )
-
-
-
 #function to synthesize the values at the regional scale
 f_regional_synthesis <- function(dataset, grouping_var) {
   
@@ -207,7 +193,7 @@ f_graph <- function(variable, breaks_large, breaks_min){
       values=c("red", "black", "gray")
       ) +
     labs(
-      x="", color=""
+      x=element_blank(), color=element_blank()
       ) +
     scale_y_continuous(
       breaks = seq(0, 2500, by = breaks_large),
@@ -281,7 +267,7 @@ f_graph <- function(variable){
       linewidth=2
       ) +
     labs(
-      x = "", y = "", color="",
+      x = element_blank(), y = element_blank(), color=element_blank(),
       title = "Our value as % of official values"
       ) +
     scale_color_manual(
@@ -340,7 +326,7 @@ ggplot(data = temp) +
     linewidth=2
     ) +
   labs(
-    x = "", y = "", color="",
+    x = element_blank(), y = element_blank(), color=element_blank(),
     title = "Our value as % of official values"
     ) +
   scale_color_manual(
@@ -391,7 +377,7 @@ f_graph <- function(variable){
       ) +
     ylim(0, NA) +
     labs(
-      x="", color=""
+      x=element_blank(), color=element_blank()
       ) +
     facet_wrap(
       vars(as.factor(name_region_parcel)), 
@@ -453,6 +439,8 @@ f_graph(`K mineral fertilization (ktK)`)
 sf_regions <- sf::st_read("source/maps/all_French_admin_units/ADMIN-EXPRESS-COG_2-1__SHP__FRA_2020-11-20/ADMIN-EXPRESS-COG/1_DONNEES_LIVRAISON_2020-11-20/ADE-COG_2-1_SHP_LAMB93_FR/REGION.shp")
 #create whole francce polygon from regions polygon union
 sf_france <- st_union(sf_regions)
+#simplify polygon for faster plotting
+sf_france <- st_simplify(sf_france, 100, preserveTopology = T)
 rm(sf_regions)
 
 # resolution of raster pixels
@@ -609,6 +597,14 @@ gg_Ntot <- f_grap_map_raster(
     title = "Total N fertilization in France (~ 2850 ktN)"
     )
 gg_Ntot
+
+
+#save for manuscript
+gg_Ntot <- gg_Ntot + labs(title = element_blank(), caption = element_blank(), subtitle = "total N fertilization", fill = "tons of N\nper km2")
+f_save_graph_pdf_png(
+  gg_Ntot, "graph/france_fertilization/", "map_Ntot_ferti",
+  1000, 5, 6
+)
 ```
 
 #####  Fertilization only on agricultural land
@@ -714,8 +710,8 @@ gg
 
 ```{r}
 #save Nmin and Norg for manuscript 
-gg <- gg_Nmin + labs(caption = "", subtitle = "mineral N", title = "", fill = "tons of N\nper km2") + 
-  gg_Norg + labs(caption = "", subtitle = "organic N", title = "", fill = "tons of N\nper km2") + 
+gg <- gg_Nmin + labs(caption = element_blank(), subtitle = "mineral N", title = element_blank(), fill = "tons of N\nper km2") + 
+  gg_Norg + labs(caption = element_blank(), subtitle = "organic N", title = element_blank(), fill = "tons of N\nper km2") + 
   plot_layout(guides = "collect", nrow=2) 
 f_save_graph_pdf_png(
   gg, "graph/france_fertilization/", "map_Nmin_Norg_ferti",
@@ -725,11 +721,11 @@ f_save_graph_pdf_png(
 #save Pmin and Kmin for manuscript 
 gg <- gg_Pmin + 
   labs(
-    caption = "", subtitle = "mineral P", title = ""
+    caption = element_blank(), subtitle = "mineral P", title = element_blank()
     ) + 
   gg_Kmin + 
   labs(
-    caption = "", subtitle = "mineral K", title = ""
+    caption = element_blank(), subtitle = "mineral K", title = element_blank()
     ) +
   plot_layout(ncol=1) 
 f_save_graph_pdf_png(
@@ -761,7 +757,7 @@ gg <- f_grap_map_raster(
 gg
 
 #save area for manuscript 
-gg <- gg + labs(caption="", title="")
+gg <- gg + labs(caption=element_blank(), title=element_blank())
 f_save_graph_pdf_png(
   gg, "graph/france_fertilization/", "map_area",
   500, 6, 7
@@ -795,7 +791,7 @@ f_graph_distribution_consistency <- function(dataset, variable, x_intercept, ann
       legend.position = "none"
       ) +
     labs(
-      y=""
+      y=element_blank()
       ) +
     annotate(
       x=x_intercept, y=y_label, geom="text", label=annotation_label, hjust=1, vjust=0

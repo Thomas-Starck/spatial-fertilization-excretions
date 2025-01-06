@@ -2,26 +2,27 @@ project:
   type: website
   output-dir: docs
   render: 
-    - index.qmd
-    - 0_crops_keys.qmd
-    - 0_cultural_practices_surveys.qmd
-    - 0_excretions.qmd
-    - 0_TOPO_vineyards_orchads.qmd
-    - 1_R11_Ile_de_France.qmd
-    - 1_R24_Centre_Val_de_Loire.qmd
-    - 1_R27_Bourgogne_Franche_Comte.qmd
-    - 1_R28_Normandy.qmd
-    - 1_R32_Hauts_de_France.qmd
-    - 1_R44_Grand_Est.qmd
-    - 1_R52_Pays_de_la_Loire.qmd
-    - 1_R53_Bretagne.qmd
-    - 1_R75_Nouvelle_Aquitaine.qmd
-    - 1_R76_Occitanie.qmd
-    - 1_R84_Auvergne_Rhone_Alpes.qmd
-    - 1_R93_Provence_Alpes_Cote_Azur.qmd
-    - 1_R94_Corse.qmd
-    - 1_gather_regions.qmd
-    - 2_France.qmd
+    - "index.qmd"
+    - "0_crops_keys.qmd"
+    - "0_cultural_practices_surveys.qmd"
+    - "0_excretions.qmd"
+    - "0_TOPO_vineyards_orchads.qmd"
+    - "1_R11_Ile_de_France.qmd"
+    - "1_R24_Centre_Val_de_Loire.qmd"
+    - "1_R27_Bourgogne_Franche_Comte.qmd"
+    - "1_R28_Normandy.qmd"
+    - "1_R32_Hauts_de_France.qmd"
+    - "1_R44_Grand_Est.qmd"
+    - "1_R52_Pays_de_la_Loire.qmd"
+    - "1_R53_Bretagne.qmd"
+    - "1_R75_Nouvelle_Aquitaine.qmd"
+    - "1_R76_Occitanie.qmd"
+    - "1_R84_Auvergne_Rhone_Alpes.qmd"
+    - "1_R93_Provence_Alpes_Cote_Azur.qmd"
+    - "1_R94_Corse.qmd"
+    - "1_gather_regions.qmd"
+    - "2_France.qmd"
+    - "2_agro_ecological.qmd"
     - "!source"
     - "!output"
     - "!renv.lock"
@@ -40,12 +41,8 @@ website:
           href: 0_TOPO_vineyards_orchads.qmd
         - text: "Cultural Practices Surveys"
           href: 0_cultural_practices_surveys.qmd
-        - text: "Nutrient excretions"
-          href: 0_excretions.qmd
       - text: "Prepare fertilization"
         menu:
-        - text: "Metropolitan France"
-          href: 2_France.qmd
         - text: "Ile-de-France"
           href: 1_R11_Ile_de_France.qmd
         - text: "Centre-Val-de-Loire"
@@ -72,8 +69,19 @@ website:
           href: 1_R93_Provence_Alpes_Cote_Azur.qmd
         - text: "Corse"
           href: 1_R94_Corse.qmd
+      - text: "Results"
+        menu:
+        - text: "Current Fertilization"
+          href: 2_France.qmd
+        - text: "Current Excretions"
+          href: 0_excretions.qmd 
+        - text: "Agro-Ecological Scenario"
+          href: 2_agro_ecological.qmd
+
+
     right:
       - icon: github
+      - href: https://github.com/Thomas-Starck/spatial-fertilization-excretions
 
 format:
   html:

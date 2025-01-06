@@ -1430,22 +1430,23 @@ temp <- survey_major_crops %>%
   )
 
 #vizualize result
-gg <- ggplot(temp) +
+gg_major <- ggplot(temp) +
   geom_point(
     aes(reorder(crop_fertilization_label, percent_N_mineral),
         percent_N_mineral, color=name_old_region),
-    position = position_nudge(x = .5), alpha=.4
+    position = position_nudge(x = .2), alpha=.4
     ) +
   geom_boxplot(
     aes(reorder(crop_fertilization_label, percent_N_mineral), percent_N_mineral),
-    position = position_nudge(x = -.2)
+    position = position_nudge(x = -.2), width = .4
     ) +
   theme(
     axis.text.x = element_text(angle=45, h=1),
     ) +
   scale_y_continuous(labels = scales::label_percent(scale = 1)) +
-  labs(x="", y="% N mineral", fill="(old) region")
-ggplotly(gg)
+  labs(x="", y="% N mineral fertilization", fill="(old) region")
+
+ggplotly(gg_major)
 ```
 
 ### Vineyards
@@ -1471,7 +1472,7 @@ temp <- survey_vineyards %>%
   gather(mineral, value, -`wine-growing basin`)
 
 #vizualize result
-gg <- ggplot(temp) +
+gg_vineyards <- ggplot(temp) +
   geom_point(
     aes(
       value,
@@ -1488,16 +1489,37 @@ gg <- ggplot(temp) +
     x="% mineral fertilization", y="", fill="nutrient",
     title = ""
     )
-ggplotly(gg)
+ggplotly(gg_vineyards)
 
 ggplot(temp) +
   geom_boxplot(aes(mineral, value, fill=mineral), alpha=.7) +
   theme(axis.text.x = element_text(angle=45, h=1)) +
   labs(x="", y="% N mineral")
 
-#remove temporary variable
-rm(temp, gg)
+
 ```
+
+```{r}
+#save for manuscript
+
+gg <- 
+  #vineyards graph
+  gg_vineyards  + labs(color = "nutrient", y="wine-growing basin") + 
+  theme(legend.position = c(0.2, 0.8)) +
+  #major crops graph
+  gg_major +  labs(x="crop", subtitle = "each dot is a region") + coord_flip() + theme(legend.position = "none")
+gg
+
+
+f_save_graph_pdf_png(
+  gg, "graph/fertilization_values/", "percent_mineral",
+  350, 4, 10
+)
+
+#remove temporary variable
+rm(temp, gg_vineyards, gg_major)
+```
+
 
 :::
 
@@ -1553,6 +1575,47 @@ f_graph_orchards <- function(data, variable_y, y_max, breaks_legnth, y_label, ti
   
   return(ggplotly(gg, tooltip = c("text")))
 }
+```
+
+```{r}
+#plot N for manuscript
+temp <- ferti_orchards %>% 
+  select(crop_fertilization_label, 
+         mineral = `N mineral mean fertilization (kgN/ha)`,
+         organic = `N organic mean fertilization (kgN/ha)`
+         ) %>%
+  mutate(
+    total = mineral + organic
+    ) %>%
+  gather(type, value, mineral, organic)
+
+temp$type <- factor(temp$type, levels = c("organic", "mineral"))
+
+gg <- ggplot(temp) +
+  geom_col(
+    aes(value, reorder(crop_fertilization_label, value), fill = type),
+    alpha=.7
+    ) +
+  geom_text(
+    aes(total, crop_fertilization_label, label = round(total)),
+    hjust = 0
+    ) +
+  theme(
+    panel.grid.major.x = element_line(),
+    panel.grid.minor.x = element_line(),
+    panel.grid.major.y = element_blank()
+    ) +
+  scale_x_continuous(
+    limits = c(0, 200),
+    breaks = seq(0, 200, 20),
+    minor_breaks = seq(0, 200, 10)
+    ) +
+  labs(fill="fertilization", x="kgN/ha", y="")
+
+f_save_graph_pdf_png(
+  gg, "graph/fertilization_values/", "orchards_fertilization_by_crops",
+  350, 3, 6
+)
 ```
 
 
@@ -1629,6 +1692,49 @@ f_graph_vegetables_floral <- function(data, variable_y, y_max, breaks_legnth, y_
   return(ggplotly(gg, tooltip = c("text")))
 }
 ```
+
+
+```{r}
+#plot N for manuscript
+temp <- ferti_vegetables_floral %>% 
+  select(crop_fertilization_label, 
+         mineral = `N mineral mean fertilization (kgN/ha)`,
+         organic = `N organic mean fertilization (kgN/ha)`
+         ) %>%
+  mutate(
+    total = mineral + organic
+    ) %>%
+  gather(type, value, mineral, organic)
+
+temp$type <- factor(temp$type, levels = c("organic", "mineral"))
+
+gg <- ggplot(temp) +
+  geom_col(
+    aes(value, reorder(crop_fertilization_label, value), fill = type),
+    alpha=.7
+    ) +
+  geom_text(
+    aes(total, crop_fertilization_label, label = round(total)),
+    hjust = 0
+    ) +
+  theme(
+    panel.grid.major.x = element_line(),
+    panel.grid.minor.x = element_line(),
+    panel.grid.major.y = element_blank()
+    ) +
+  scale_x_continuous(
+    limits = c(0, 500),
+    breaks = seq(0, 500, 100),
+    minor_breaks = seq(0, 500, 50)
+    ) +
+  labs(fill="fertilization", x="kgN/ha", y="")
+
+f_save_graph_pdf_png(
+  gg, "graph/fertilization_values/", "vegetables_floral_fertilization_by_crops",
+  350, 3, 6
+)
+```
+
 
 ::: panel-tabset
 ### N mineral

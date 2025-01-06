@@ -1,0 +1,471 @@
+---
+title: "France agro-ecological"
+---
+
+```{r setup, include=T, message=F, warning=F}
+knitr::opts_chunk$set(message=F, warning=F, results=F, France_excretions_current_4km2fig.align = "center",  dev='png')
+
+# Load the function file common to all pages
+source("functions.R")
+#included:
+#-function to save csv f_save_csv_files
+#-set the default scale_color and scale_fill to viridis theme
+#-loads the core tidyverse package
+
+library(arrow) #to read and write parquet file, and set objects to arrow tables
+library(sf)
+library(cowplot)
+library(patchwork)
+
+#set theme for graphs
+theme_set(
+  theme_classic() +
+  theme(
+    panel.grid.major.y = element_line(), #no vertical lines by default
+    #text = element_text(family = "Times New Roman"), #default font
+    plot.title = element_text(face="bold"), #graphs titles in bolds
+    )
+  )
+
+CRS_RGF93_Lambert93 <- 2154 # number of coordinate projection system used for France (Réseau Géodésique Français 1993 - Lambert 93)
+percent_N_excreted_urine <- 0.85
+N_excretions_agro_ecological_diet <- 3.5 #kgN/cap/year
+N_ferti_non_legumes_agro_ecological_rotation <- 50 #kgN/ha
+```
+
+# Load and prepare data
+
+```{r load_files}
+France_agro_ecological_rotations <- read_csv("source/fertilization/rotations_agro_ecological.csv")
+France_fertilization_current <- read_parquet("output/full_data/France_2018.parquet") #current fertilization in 2018
+
+#ORCHARDS
+sum(France_fertilization_current %>% filter(our_label %in% c("Orchards" )) %>% pull(`N mineral fertilization (kgN)`) %>% na.omit(), na.rm=T)/10^6 #20 ktNmin for rochards
+sum(France_fertilization_current %>% filter(our_label %in% c("Orchards" )) %>% pull(parcel_area_ha) %>% na.omit(), na.rm=T)/10^6 #0.31 Mha orchards
+#mean 65 kgN/ha
+
+
+sum(France_fertilization_current %>% filter(our_label == "Vegetables or floral crops") %>% pull(`N mineral fertilization (kgN)`) %>% na.omit(), na.rm=T)/10^6 #27 ktNmin for vegetables and floral crops
+
+
+France_excretions_current_4km2 <- read_csv("output/excretions/excretions_by_4km2.csv")
+France_excretions_current_1km2 <- read_csv("output/excretions/excretions_by_1km2.csv")
+```
+
+::: panel-tabset
+## Fertilization agro-ecological
+
+```{r prepare_agro_ecological_file_template}
+# prepare agro-ecological file template
+
+#set to arrow to save memory and faster handling
+France_fertilization_current <- arrow_table(France_fertilization_current)
+
+#prepare agro-ecological fertilization template, select only variables of interest
+France_fertilization_agro_ecological <- France_fertilization_current %>%
+  select(
+    our_label, `N mineral fertilization (kgN)`,
+    code_old_region_parcel, name_old_region_parcel, 
+    code_region_parcel, name_region_parcel, 
+    parcel_area_ha, lat_RGF93_LAMB_93_parcel, lon_RGF93_LAMB_93_parcel
+    ) 
+
+sum(France_fertilization_agro_ecological %>% collect() %>% pull(parcel_area_ha))/10^6 #28.6 Mha
+```
+
+Permanent grasslands are assumed to be not fertilized with human excretions. Vineyards, orchards and Vegetables and floral crops are fertilized up to their current mineral fertilization level.
+
+```{r prepare_agro_ecological_fertilization_permanent_grasslands_and_crops}
+#permanent grasslands not fertilized with human excretions
+temp_permanent_grasslands <- France_fertilization_agro_ecological %>%
+  filter(our_label %in% c("Permanent grasslands")) %>%
+  mutate(`N mineral fertilization (kgN)` = 0) 
+sum(temp_permanent_grasslands %>% collect() %>% pull(parcel_area_ha))/10^6 #7.6 Mha
+
+#permanent crops (vineyards and orchards) replace current rates of mineral fertilization
+temp_permanent_crops <- France_fertilization_agro_ecological %>%
+  filter(our_label %in% c("Vineyards", "Orchards")) %>%
+  mutate(
+    our_label = "Permanent crops",
+    ) 
+sum(temp_permanent_crops %>% collect() %>% pull(parcel_area_ha))/10^6 #1.1 Mha
+sum(temp_permanent_crops %>% pull(`N mineral fertilization (kgN)`) %>% na.omit(), na.rm=T)/10^6 #32 ktN for perm crops
+#mean 29 kgN/ha
+
+#Vegetables or floral crops fertilized as current N mineral
+temp_vegetables_floral <- France_fertilization_agro_ecological %>%
+  filter(our_label == "Vegetables or floral crops")
+sum(temp_vegetables_floral %>% collect() %>% pull(parcel_area_ha))/10^6 #0.3 Mha
+sum(temp_vegetables_floral %>% pull(`N mineral fertilization (kgN)`) %>% na.omit(), na.rm=T)/10^6 #26 ktN 
+#mean 90 kgN/ha
+```
+
+```{r prepare_agro_ecological_fertilization_arable_land}
+#rest, i.e. arable land, fertilized at 50 kgN/ha for non-legume crops in the agro-ecological rotation
+
+#select arable croplands
+temp_arable <-  France_fertilization_agro_ecological %>%
+  filter(!(our_label %in% c("Permanent grasslands", "Vineyards", "Orchards", "Vegetables or floral crops"))) %>%
+  mutate(our_label = "Agro-Ecological Rotations") 
+sum(temp_arable %>% collect() %>% pull(parcel_area_ha))/10^6 #19.5 Mha
+
+#add non-legume frequency in agro-ecological rotation, for each region
+temp_arable <- left_join(
+  temp_arable,
+  France_agro_ecological_rotations %>% 
+    
+    #remove name region already present in main file, and fraction legumes not used
+    select(-c(name_old_region, fract_legume_forage, fract_legume_grain)) %>% 
+    
+    #code_old_region has to be a character as in temp_arable for join; also rename it for join
+    rename(code_old_region_parcel = code_old_region) %>%
+    mutate(code_old_region_parcel = as.character(code_old_region_parcel)), 
+  
+  by="code_old_region_parcel"
+  )
+
+#compute mean fertilization based on fertilization on non legume crops and their frequency
+temp_arable <- temp_arable %>%
+  mutate(`N mineral fertilization (kgN)` = N_ferti_non_legumes_agro_ecological_rotation*fract_non_legume*parcel_area_ha) %>%
+  select(-fract_non_legume) #remove fraction non legume variable to keep same template
+
+sum(temp_arable %>% collect() %>% pull(`N mineral fertilization (kgN)`), na.rm=T)/10^6 #620 ktN
+sum(temp_arable %>% collect() %>% pull(parcel_area_ha))/10^6 #19.5 Mha
+```
+
+
+```{r gather_and_save_agro_ecological_fertilization}
+#gather and save data of agro-ecological fertilization
+
+#gather the 3 fertilization files to create fertilization for whole France agro-ecological, remove temporary files
+France_fertilization_agro_ecological <- bind_rows(
+  temp_permanent_grasslands %>% collect(), 
+  temp_permanent_crops %>% collect(), 
+  temp_vegetables_floral %>% collect(), 
+  temp_arable %>% collect()
+) 
+rm(temp_permanent_crops, temp_permanent_grasslands, temp_vegetables_floral, temp_arable)
+
+#save France agro-ecological
+f_save_parquet_files(
+  France_fertilization_agro_ecological, 
+  "output/full_data/",
+  "France_agro_ecological.parquet"
+)
+
+sum(France_fertilization_agro_ecological$`N mineral fertilization (kgN)`, na.rm=T)/10^6 #total 677 ktN
+```
+
+
+## Excretions agro-ecological diet
+
+```{r prepare_agro_ecological_diets_fertilization}
+total_current_N_excretion <- sum(France_excretions_current_4km2$kgN_excretions)/10^6 #280 ktN currently excreted in France
+total_current_N_excretion_1km2 <- sum(France_excretions_current_1km2$kgN_excretions)/10^6 #283 ktN currently excreted in France
+total_population <- sum(France_excretions_current_4km2$population)/10^6  #62.3 million inhabitants in France
+total_population_1km2 <- sum(France_excretions_current_1km2$population)/10^6  #62.9 million inhabitants in France
+N_excretions_current_diet <- total_current_N_excretion/total_population #4.51 kgN/cap/year currently excreted
+N_excretions_current_diet_1km2 <- total_current_N_excretion_1km2/total_population_1km2 #4.51 kgN/cap/year currently excreted
+ratio_excretions_agroecolo_current <- N_excretions_agro_ecological_diet/N_excretions_current_diet #ratio 0.78 agroecologial/current diet
+
+#excretion in each commune for agro-ecological diet, to plot
+France_excretions_agro_ecological <- France_excretions_current_4km2 %>%
+  select(
+    cell_ID,
+    code_commune_excr, name_commune_excr,
+    code_region_excr, name_region_excr,
+    code_old_region_excr, name_old_region_excr,
+    population, 
+    pop_per_km2,
+    kgN_excretions, tNmin_per_km2, 
+    lon_RGF93_LAMB_93_excr, lat_RGF93_LAMB_93_excr
+    ) %>%
+  mutate(
+    kgN_excretions = kgN_excretions*ratio_excretions_agroecolo_current,
+    kgN_urine = kgN_excretions*percent_N_excreted_urine,
+    kgN_feces = kgN_excretions*(1-percent_N_excreted_urine),
+    tN_excretions_per_km2 = tNmin_per_km2*ratio_excretions_agroecolo_current
+  )
+
+f_save_csv_files(
+  France_excretions_agro_ecological, "output/excretions/",
+  "excretions_agro_ecological_by_4km2.csv"
+)
+f_save_parquet_files(
+  France_excretions_agro_ecological, "output/excretions/",
+  "excretions_agro_ecological_by_4km2.parquet"
+)
+
+#idem for 1 km2
+
+#excretion in each commune for agro-ecological diet, to plot
+temp <- France_excretions_current_1km2 %>%
+  select(
+    cell_ID,
+    code_commune_excr, name_commune_excr,
+    code_region_excr, name_region_excr,
+    code_old_region_excr, name_old_region_excr,
+    population, 
+    pop_per_km2,
+    kgN_excretions, 
+    lon_RGF93_LAMB_93_excr, lat_RGF93_LAMB_93_excr
+    ) %>%
+  mutate(
+    kgN_excretions = kgN_excretions*ratio_excretions_agroecolo_current,
+    kgN_urine = kgN_excretions*percent_N_excreted_urine,
+    kgN_feces = kgN_excretions*(1-percent_N_excreted_urine)
+  )
+
+f_save_csv_files(
+  temp, "output/excretions/",
+  "excretions_agro_ecological_by_1km2.csv"
+)
+f_save_parquet_files(
+  temp, "output/excretions/",
+  "excretions_agro_ecological_by_1km2.parquet"
+)
+
+round(sum(France_excretions_agro_ecological$kgN_excretions)/10^6) #218 ktN in agro-ecological diet
+
+#rename for rasters graphs
+France_excretions_agro_ecological <- France_excretions_agro_ecological %>%
+  rename(x = lon_RGF93_LAMB_93_excr, y = lat_RGF93_LAMB_93_excr)
+```
+
+:::
+
+# Results
+
+::: panel-tabset
+## National
+
+```{r}
+temp <- France_fertilization_agro_ecological %>%
+  filter(our_label !="Permanent grasslands") %>%
+  group_by(our_label) %>%
+  summarise(
+    `Fertilization\npotential demand` = sum(`N mineral fertilization (kgN)`, na.rm=T)/10^6
+    ) %>%
+  gather(variable, value, `Fertilization\npotential demand`) %>%
+  rename(color = our_label)
+
+temp2 <- France_excretions_agro_ecological %>%
+  summarise(
+    Excretions = sum(kgN_excretions)/10^6,
+    ) %>%
+  gather(color, value, Excretions) %>%
+  mutate(variable = "Excretions")
+
+temp <- bind_rows(temp, temp2)
+
+#for labels
+temp2 <- temp %>%
+  group_by(variable) %>%
+  summarise(value = round(sum(value)))
+
+gg1 <- ggplot(temp) +
+  geom_col(aes(variable, value, fill=color)) +
+  geom_label(
+    data = temp2, aes(variable, value, label=paste(value, "ktN")),
+    vjust=0
+    ) +
+  #ylim(0, 650) +
+  labs(
+    x=element_blank(), y="ktN", fill=element_blank(),
+    title = "Comparison of excretions and fertilization demand",
+    subtitle = "in agro-ecological scenario for Metropolitan France"
+    ) +
+  scale_fill_manual(
+    breaks = c("Excretions", "Agro-Ecological Rotations", "Permanent crops", "Vegetables or floral crops"),
+    values = c("red", "#474F58", "#757B82", "#D1D3D5")
+  )
+gg1
+```
+
+
+## Regions
+
+```{r}
+temp <- France_fertilization_agro_ecological %>%
+  filter(name_region_parcel !="Corse") %>%
+  group_by(code_region_parcel) %>%
+  summarise(
+    fertilization = sum(`N mineral fertilization (kgN)`, na.rm=T)/10^6
+    ) 
+
+temp2 <- France_excretions_agro_ecological %>%
+  filter(name_region_excr !="Corse") %>%
+  group_by(code_region_excr, name_region_excr) %>%
+  summarise(
+    Excretions = sum(kgN_excretions)/10^6,
+    )
+  
+temp2 <- left_join(temp2, temp, join_by("code_region_excr" == "code_region_parcel"))
+
+temp2 <-  temp2 %>%
+  mutate(
+    adequate = case_when(
+      fertilization>Excretions ~ "less excretions than fertilization demand",
+      T~"more excretions than fertilization demand"
+    )
+  )
+
+
+gg2 <- ggplot() +
+  geom_col(
+    data=temp2 %>% filter(!is.na(name_region_excr)),
+    aes(reorder(name_region_excr, Excretions), Excretions, fill="Excretions"),
+    position = position_nudge(x = 0.15), width = 0.25
+  ) +
+  geom_col(
+    data = temp2 %>% filter(!is.na(name_region_excr)),
+    aes(name_region_excr, fertilization, fill="Fertilization\npotential demand"),
+    width = 0.25,
+    position = position_nudge(x = -0.15)
+    ) +
+  theme(
+    axis.text.x = element_text(angle=45, hjust=1),
+    legend.position = "right"
+  ) +
+  labs(
+    x=element_blank(), y="ktN", fill=element_blank(),
+    title = "Comparison of excretions to fertilization demand",
+    subtitle = "by French regions"
+  ) +
+  scale_fill_manual(
+    breaks = c("Excretions", "Fertilization\npotential demand"),
+    values = c("red", "darkgrey")
+  ) +
+  #facet_wrap(vars(adequate), nrow=2, scales = "free_y") +
+  coord_flip()
+
+gg2
+
+rm(temp, temp2)
+```
+
+```{r}
+#save for manuscript
+
+gg <- gg1 + labs(title = element_blank(), subtitle = "metropolitan France") + gg2 + labs(title = element_blank(), subtitle = "by French regions")
+
+f_save_graph_pdf_png(
+  gg, "graph/france_fertilization/", "agroecol_demand_supply", 350, 6, 10
+)
+```
+
+
+
+:::
+
+# Present results geographical, faire tourner algo
+
+```{r prepare_background_france_map_sf_france}
+#create background France map
+
+#load map regions
+sf_regions <- sf::st_read("source/maps/all_French_admin_units/ADMIN-EXPRESS-COG_2-1__SHP__FRA_2020-11-20/ADMIN-EXPRESS-COG/1_DONNEES_LIVRAISON_2020-11-20/ADE-COG_2-1_SHP_LAMB93_FR/REGION.shp")
+#create whole francce polygon from regions polygon union
+sf_france <- st_union(sf_regions)
+rm(sf_regions)
+
+# resolution of raster pixels
+resolution_meters <- 2000
+km2_resolution <- (resolution_meters/10^3)^2
+ha_resolution <- km2_resolution*100
+```
+
+
+## excretions
+
+```{r}
+breaks <- c(0, 1, 3, 5, 10, 100000)
+labels <- c("< 1", "1 - 3", "3 - 5", "5 - 10", "> 10")
+
+France_excretions_agro_ecological <- f_categorize_densities(
+  France_excretions_agro_ecological, "tN_excretions_per_km2", breaks, labels)
+```
+
+
+```{r graph_N_1km2}
+f_grap_map_raster(
+  France_excretions_agro_ecological, 
+  category, "tons of\nN excreted\nper km2", resolution_meters,
+  sf_france, "#440154"
+  ) + 
+  labs(
+    title = "N excretions in France (~ 280 ktN)"
+    )
+
+#plot at commune scale
+#f_graph_communes("N excretions in France(~ 280 ktN)", "mean\nkgN excreted\nper ha")
+```
+
+
+## fertilization
+
+agro ecological
+
+donne 33.50 kgN/ha dans le sud
+31.25 dans le nord
+
+70 sur permanent crops
+
+```{r}
+#selects columns for interest for year 2019
+data_map <- France_fertilization_agro_ecological %>% 
+  select(
+    parcel_area_ha, 
+    kgNmin = `N mineral fertilization (kgN)`,
+    lat_RGF93_LAMB_93_parcel, lon_RGF93_LAMB_93_parcel
+    ) %>%
+  mutate(    
+    kgPmin = 0,
+    kgKmin = 0,
+    kgNorg = 0
+    )
+
+#sf for geographical
+data_map <- st_as_sf(data_map, coords = c("lon_RGF93_LAMB_93_parcel", "lat_RGF93_LAMB_93_parcel"), crs = CRS_RGF93_Lambert93) 
+
+
+#create raster
+raster_density <- f_prepare_raster(
+  data_map, 
+  parcel_area_ha, kgNmin, kgPmin, kgKmin, kgNorg,
+  resolution_meters, sf_france
+  )
+```
+
+```{r}
+raster_density <- f_categorize_densities(
+  raster_density, "tNmin_per_km2",  c(0, 1, 3, 5, 10, 100000), c("< 1", "1 - 3", "3 - 5", "5 - 10", ">10"))
+
+gg <- f_grap_map_raster(
+  raster_density, 
+  category, "tons of N\nper km2", resolution_meters,
+  sf_france, "#440154"
+  ) + 
+  labs(
+    title = "Agro-ecological demand for N excretions in France (~ 680 ktN)"
+    )
+gg
+
+
+#save map for manuscript
+gg <- gg + labs(caption=element_blank(), title = element_blank())
+f_save_graph_pdf_png(
+  gg, "graph/france_fertilization/", "map_Nferti_demand_agroeco",
+  1000, 5, 6
+)
+```
+
+
+
+
+```{r}
+#remove all elements from environment
+rm(list = ls())
+```
+
+

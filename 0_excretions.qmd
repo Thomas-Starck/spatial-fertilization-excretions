@@ -45,6 +45,8 @@ P2O5_P_conversion_factor <- (2*31)/(2*31+5*16)
 #load map regions and create a whole France polygon from this
 sf_regions <- sf::st_read("source/maps/all_French_admin_units/ADMIN-EXPRESS-COG_2-1__SHP__FRA_2020-11-20/ADMIN-EXPRESS-COG/1_DONNEES_LIVRAISON_2020-11-20/ADE-COG_2-1_SHP_LAMB93_FR/REGION.shp")
 sf_france <- st_union(sf_regions)
+#simplify polygon for faster plotting
+sf_france <- st_simplify(sf_france, 100, preserveTopology = T)
 rm(sf_regions)
 
 #load map communes
@@ -498,10 +500,63 @@ population_4km2 <- f_prepare_raster(
 #rm(population_1km2)
 ```
 
+join raster data with communes description = 1 km2
 
-join raster data with communes description
+```{r add_commune_belonging_and_descriptions_to_pixels_1km2}
+population_1km2 <- st_as_sf(population_1km2, coords = c("x", "y"), crs = CRS_RGF93_Lambert93) %>%
+  #remove pixels with no population
+  filter(is.na(population)==F)
 
-```{r add_commune_belonging_and_descriptions_to_pixels}
+#to save coordinates in 2 columns later (points geometry dropped in the following join)
+population_1km2 <- population_1km2 %>%
+  mutate(
+    y = st_coordinates(geometry)[, "Y"],
+    x = st_coordinates(geometry)[, "X"]
+  )
+
+#attribute each point of population_1km2 to a polygon commune of sf_communes
+#st_join(population_1km2, temp_anonym, join = st_within) would be conceptually more correct, but is way slower
+
+#first, dropping the points not within a commune polygon, to see the % of losses
+join_dropping_unattributed_points <- st_join(sf_communes, population_1km2, join = st_intersects)
+
+# 0.4% of pixels not attributed to a commune
+(nrow(population_1km2)-nrow(join_dropping_unattributed_points))/nrow(population_1km2)*100 
+
+#correspond to 0.4% of the original population in the population_1km2 file
+(sum(population_1km2$population, na.rm=T)-sum(join_dropping_unattributed_points$population, na.rm=T))/sum(population_1km2$population, na.rm=T)*100
+
+#now real join, keeping the pixels with unattributed communes
+population_1km2 <- st_join(population_1km2, sf_communes, join = st_intersects)
+rm(join_dropping_unattributed_points)
+
+#add old regions with spatial join
+population_1km2 <- st_join(population_1km2, sf_old_regions %>% select(code_old_region = code_insee), join = st_intersects)
+
+#remove data communes present in sf not attributed to pixels (based on in existent lat and long)
+population_1km2 <- population_1km2 %>% filter(is.na(x)==F & is.na(y)==F)
+
+#the join removed pixels points and added communes polygons: recompute points and remove polygons
+population_1km2 <- population_1km2 %>% st_drop_geometry()
+# population_1km2 <- st_as_sf(population_1km2, coords = c("lon_RGF93_LAMB_93", "lat_RGF93_LAMB_93"), crs = CRS_RGF93_Lambert93) 
+# population_1km2 <- population_1km2 %>%
+#   mutate(
+#     lat_RGF93_LAMB_93 = st_coordinates(geometry)[, "Y"],
+#     lon_RGF93_LAMB_93 := st_coordinates(geometry)[, "X"]
+#   )
+
+#add region and old region names
+temp <- read_csv("source/regions_data/regions_keys.csv", col_types = cols("c", "c", "c", "c"))
+#add region name based on code_region 
+population_1km2 <- population_1km2 %>% left_join(temp %>% select(code_region, name_region) %>% distinct(), by="code_region")
+#add old region name based on code_old_region
+population_1km2 <- population_1km2 %>% left_join(temp %>% select(code_old_region, name_old_region), by="code_old_region")
+rm(temp)
+```
+
+join raster data with communes description = 4 km2
+
+```{r add_commune_belonging_and_descriptions_to_pixels_4km2}
 population_4km2 <- st_as_sf(population_4km2, coords = c("x", "y"), crs = CRS_RGF93_Lambert93) %>%
   #remove pixels with no population
   filter(is.na(population)==F)
@@ -559,6 +614,20 @@ population_4km2 <- population_4km2 %>%
   mutate(
   #population
   pop_per_km2 = population/km2_resolution,
+  pop_commune_per_ha = pop_per_km2/100,
+    ) %>%
+  filter(
+    is.na(pop_per_km2)==F
+    )
+```
+
+
+```{r prepare_raster_1km2_density}
+#transform for variable per our resolution (here 1 km2) to variable per km2
+population_1km2 <- population_1km2 %>%
+  mutate(
+  #population
+  pop_per_km2 = population,
   pop_commune_per_ha = pop_per_km2/100,
     ) %>%
   filter(
@@ -662,6 +731,39 @@ f_save_csv_files(
 f_save_parquet_files(
   temp, "output/excretions/",
   "excretions_by_4km2.parquet"
+)
+#sum(temp$population)
+
+
+
+# RASTER 1 KM2 DATASET
+
+temp <- population_1km2 %>%
+  #create a unique ID
+  mutate(ID = row_number()) %>%
+  rename(
+    lat_RGF93_LAMB_93_excr = y,
+    lon_RGF93_LAMB_93_excr = x,
+    cell_ID = ID
+    ) %>%
+  #explicitly say it concerns excretions
+  rename(
+    code_region_excr = code_region,
+    name_region_excr = name_region,
+    code_department_excr = code_department,
+    code_commune_excr = code_commune,
+    name_commune_excr = name_commune,
+    code_old_region_excr = code_old_region,
+    name_old_region_excr = name_old_region,
+  )
+
+f_save_csv_files(
+  temp, "output/excretions/",
+  "excretions_by_1km2.csv"
+)
+f_save_parquet_files(
+  temp, "output/excretions/",
+  "excretions_by_1km2.parquet"
 )
 #sum(temp$population)
 
@@ -773,14 +875,25 @@ population_communes <- f_categorize_densities(
 ### 4 km2 data
 
 ```{r graph_N_1km2}
-f_grap_map_raster(
+gg <- f_grap_map_raster(
   population_4km2, 
   category, "tons of\nN excreted\nper km2", resolution_meters,
   sf_france, "#440154"
   ) + 
   labs(
-    title = "N excretions in France(~ 280 ktN)"
+    title = "N excretions in France (~ 280 ktN)"
     )
+gg
+
+
+
+#save for manuscript
+gg <- gg + labs(title = "", caption="")
+f_save_graph_pdf_png(
+  gg, 
+  "graph/excretions/", "map_N_excreted",
+  1000, 5, 6
+)
 
 #plot at commune scale
 #f_graph_communes("N excretions in France(~ 280 ktN)", "mean\nkgN excreted\nper ha")

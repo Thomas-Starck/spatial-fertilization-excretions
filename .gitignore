@@ -9,5 +9,8 @@
 source
 output
 
+# ignore the local renv library
+renv/library
+
 # ignore all .DS_Store
 **/.DS_Store

@@ -150,6 +150,55 @@ ferti_values <- ferti_N_min %>%
 f_save_csv_files(ferti_values, "output/fertilization", "fertilization_all_crops.csv")
 ```
 
+```{r}
+#save graph regional orchards fertilization for manuscript
+#summarize fertilization values by region
+temp <- france %>%
+  filter(our_label== "Orchards") %>%
+  group_by(name_region_parcel) %>%
+  na.omit() %>%
+  summarise(
+    `N mineral fertilization (kgN/ha)` = mean(`N mineral fertilization (kgN)`/parcel_area_ha, na.rm=T),
+    `P mineral fertilization (kgP/ha)` = mean(`P mineral fertilization (kgP)`/parcel_area_ha, na.rm=T),
+    `K mineral fertilization (kgK/ha)` = mean(`K mineral fertilization (kgK)`/parcel_area_ha, na.rm=T),
+    `N organic fertilization (kgN/ha)` = mean(`N organic fertilization (kgN)`/parcel_area_ha, na.rm=T)
+  )
+
+#keep only N ferti
+temp <- temp %>%
+  select(name_region_parcel, mineral = `N mineral fertilization (kgN/ha)`, organic = `N organic fertilization (kgN/ha)`) %>%
+  mutate(total = mineral + organic) %>%
+  gather(type, value, mineral, organic)
+
+temp$type <- factor(temp$type,  levels = c("organic", "mineral"))
+  
+gg <- ggplot(temp) +
+  geom_col(
+    aes(reorder(name_region_parcel, total), value, fill=type),
+    alpha=.7
+    ) +
+  geom_text(
+    aes(name_region_parcel, total, label=round(total)),
+    hjust=0
+    ) +
+  coord_flip() +
+  theme(
+    panel.grid.major.x = element_line(),
+    panel.grid.minor.x = element_line(),
+    panel.grid.major.y = element_blank()
+    ) +
+  scale_y_continuous(
+    limits = c(0, 200),
+    breaks = seq(0, 200, 20),
+    minor_breaks = seq(0, 200, 10)
+    ) +
+  labs(x="", y="kgN/ha", fill="fertilization")
+
+f_save_graph_pdf_png(
+  gg, "graph/fertilization_values/", "orchards_fertilization_regional",
+  350, 3, 6
+)
+```
 
 
 ```{r}
