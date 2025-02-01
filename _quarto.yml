@@ -77,11 +77,9 @@ website:
           href: 0_excretions.qmd 
         - text: "Agro-Ecological Scenario"
           href: 2_agro_ecological.qmd
-
-
     right:
       - icon: github
-      - href: https://github.com/Thomas-Starck/spatial-fertilization-excretions
+        href: https://github.com/Thomas-Starck/spatial-fertilization-excretions
 
 format:
   html:

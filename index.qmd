@@ -1,6 +1,19 @@
 ---
-title: "Introduction"
+title: "Home"
+bibliography: references.bib  
 ---
 
 
-This site analyses the data from the Registre Parcellaire Graphique (RPG, Geographic Parcel Register).
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning=F, message=F, results=F, dev='svg')
+```
+
+This website describes how to get the results presented in Chapter 6 of @starck2024towards. The results here go beyond what is presented in the articles. 
+
+This project estimates N, P and K fertilization at fine spatial resolutions (agricultural parcel level) in France. Multiple sources are used: the RPG database (*Registre Parcellaire Graphique*) and the TOPO database for the spatial distribution of crops; and the French *Enquêtes Pratiques Culturales* to estimate fertilization on each agricultural parcel. They are presented in the tab *Data Source Presentation*.
+
+The computation are quite heavy, and are performed for each region in the tab *Prepare ferttilization*.
+
+The actual results are displayed in *Results*, presenting estimates of the fertilization in the current situation, but also in an agro-ecological scenario with low fertilization inputs. I also produce a spatially explicit estimation of the nutrient excreted by French people, which, coupled with the fertilization estimates, is used to assess the distances between excretions and fertilization (see details in Chapter 6 of @starck2024towards).
+
+The code to generate the results and website is accessible on this [github repository](https://github.com/Thomas-Starck/spatial-fertilization-excretions){target="_blank"}; it is associated to a permanent repository on zenodo at [https://doi.org/10.5281/zenodo.14605711](https://doi.org/10.5281/zenodo.14605711){target="_blank"}. As the source and output data are on the order of 1-10 GB and could not be commited to the github repository, they are stored on an additional zenodo repository at [https://doi.org/10.5281/zenodo.14605243](https://doi.org/10.5281/zenodo.14605243){target="_blank"}.
